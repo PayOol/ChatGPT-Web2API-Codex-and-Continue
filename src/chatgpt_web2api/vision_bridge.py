@@ -53,15 +53,23 @@ def _require_empty_composer(state):
 def normalize_images(messages):
     normalized = copy.deepcopy(messages)
     user_images = {}
+    known_calls = set()
     for i, message in enumerate(normalized):
+        if message.get("role") == "assistant":
+            known_calls.update(call.get("id") for call in message.get("tool_calls") or [])
         content = message.get("content")
         if not isinstance(content, list):
             continue
         for index, part in enumerate(content):
             if not isinstance(part, dict) or part.get("type") != "image_url":
                 continue
-            if message.get("role") != "user":
-                raise ValueError("Inline images are accepted only in user messages")
+            role = message.get("role")
+            if role == "tool":
+                call_id = message.get("tool_call_id")
+                if not call_id or call_id not in known_calls:
+                    raise ValueError("Tool image requires a matching preceding tool call")
+            elif role != "user":
+                raise ValueError("Inline images require a user message or a matched tool result")
             value = part.get("image_url", {})
             url = value.get("url", "") if isinstance(value, dict) else value
             image = registry.data_url(url)
@@ -70,7 +78,7 @@ def normalize_images(messages):
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             content[index] = {
                 "type": "text",
-                "text": f"[User image SHA256:{digest}; actual pixels attached to its first request]",
+                "text": f"[{role.title()} image SHA256:{digest}; actual pixels attached to its first request]",
             }
     return normalized, user_images
 

@@ -18,6 +18,8 @@ from .tool_bridge import ToolRequestError
 def alias(name, namespace=None):
     if not isinstance(name, str) or not name:
         raise ToolRequestError("A client tool requires a name")
+    if namespace is not None and (not isinstance(namespace, str) or not namespace):
+        raise ToolRequestError("A tool namespace requires a name")
     key = f"{namespace}__{name}" if namespace else name
     if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", key):
         return key
@@ -62,14 +64,19 @@ class ResponsesCodec:
         self.unavailable_hosted = []
         tools = []
 
-        def add(tool, namespace=None):
+        def add(tool, namespace=None, namespace_description=""):
             if not isinstance(tool, dict):
                 raise ToolRequestError("Invalid Responses tool")
             if tool.get("type") == "namespace":
                 if namespace or not isinstance(tool.get("tools"), list):
                     raise ToolRequestError("Invalid tool namespace")
+                if not isinstance(tool.get("name"), str) or not tool["name"]:
+                    raise ToolRequestError("A tool namespace requires a name")
+                description = tool.get("description") or ""
+                if not isinstance(description, str):
+                    raise ToolRequestError("Namespace description must be text")
                 for child in tool["tools"]:
-                    add(child, tool.get("name"))
+                    add(child, tool["name"], description)
                 return
             kind = tool.get("type")
             if kind in {"web_search", "web_search_preview"} and namespace is None:
@@ -84,9 +91,11 @@ class ResponsesCodec:
             if name in self.native:
                 raise ToolRequestError("Duplicate Responses tool")
             self.native[name] = {"name": tool["name"], "type": kind, "namespace": namespace}
-            description = tool.get("description", "")
+            description = tool.get("description") or ""
+            if not isinstance(description, str):
+                raise ToolRequestError("Tool description must be text")
             if namespace:
-                description = f"Client tool {namespace}.{tool['name']}. " + description
+                description = f"Client tool {namespace}.{tool['name']}. {namespace_description}\n" + description
             if kind == "custom":
                 description += "\nNative freeform input; return its exact source in arguments.input."
                 if tool.get("format"):
@@ -162,9 +171,36 @@ class ResponsesCodec:
                 raise ToolRequestError(f"Unsupported Responses input item: {kind}")
         choice = body.get("tool_choice", "auto")
         if isinstance(choice, dict):
-            if choice.get("type") not in {"function", "custom"}:
+            if choice.get("type") == "allowed_tools":
+                mode, allowed = choice.get("mode"), choice.get("tools")
+                if mode not in {"auto", "required"} or not isinstance(allowed, list) or not allowed:
+                    raise ToolRequestError("allowed_tools requires a mode and a nonempty tool list")
+                names = set()
+                for ref in allowed:
+                    if not isinstance(ref, dict):
+                        raise ToolRequestError("Invalid allowed tool")
+                    if ref.get("type") == "namespace":
+                        namespace = ref.get("name")
+                        alias("check", namespace if namespace is not None else "")
+                        selected = {n for n, spec in self.native.items() if spec["namespace"] == namespace}
+                        if not selected:
+                            raise ToolRequestError("Allowed namespace is not available")
+                        names.update(selected)
+                    else:
+                        name = alias(ref.get("name"), ref.get("namespace"))
+                        spec = self.native.get(name)
+                        if ref.get("type") not in {"function", "custom"} or not spec or spec["type"] != ref["type"]:
+                            raise ToolRequestError("Allowed tool is not available")
+                        names.add(name)
+                tools = [tool for tool in tools if tool["function"]["name"] in names]
+                choice = mode
+            elif choice.get("type") in {"function", "custom"}:
+                name = alias(choice.get("name"), choice.get("namespace"))
+                if name not in self.native or self.native[name]["type"] != choice["type"]:
+                    raise ToolRequestError("Named tool_choice must match an available tool and type")
+                choice = {"type": "function", "function": {"name": name}}
+            else:
                 raise ToolRequestError("Unsupported Responses tool_choice")
-            choice = {"type": "function", "function": {"name": alias(choice.get("name"), choice.get("namespace"))}}
         self.chat = {"model": "auto", "stream": False, "messages": messages,
                      "tools": tools, "tool_choice": choice,
                      "parallel_tool_calls": body.get("parallel_tool_calls", True)}

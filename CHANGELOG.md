@@ -1,3 +1,12 @@
+# Distribution 0.4.5
+
+- Corrige les images natives renvoyées par un outil Codex : elles restent des résultats d'outil, sont rattachées à leur appel et leurs pixels sont joints à la continuation. Les captures historiques ne sont pas renvoyées à chaque tour.
+- Conserve les descriptions des espaces de noms et accepte les descriptions nulles facultatives.
+- Donne des exemples explicites de découverte `ALL_TOOLS` et de transmission des pixels avec `image(...)`, après reproduction d'appels mal construits dans Codex.
+- Prend en charge les restrictions `allowed_tools` et vérifie le type des outils imposés, tout en conservant les résultats historiques des outils exclus au tour courant.
+- Ajoute une matrice de tests du parcours HTTP Responses pour les appels fonction/libres, résultats multiples, Unicode, images, espaces de noms et restrictions.
+- Précise la portée de la compatibilité et ses limites dans [CODEX-TOOLS.md](docs/CODEX-TOOLS.md).
+
 # Distribution 0.4.4
 
 - Affiche dans Codex les étapes horodatées observées par la passerelle pendant la génération, avec maintien de connexion toutes les 15 secondes.

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from configure import available_port, read_json, write_changed, write_json
 
-VERSION = "0.4.4"
+VERSION = "0.4.5"
 PRODUCT = "Web2API-Continue"  # Retained for common maintenance/backward compatibility.
 TARGET = "codex"
 
