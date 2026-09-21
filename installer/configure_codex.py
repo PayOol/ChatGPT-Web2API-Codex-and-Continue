@@ -150,6 +150,8 @@ def configure(root: Path, source: Path, browser: Path, *, desktop_app_id: str = 
     if not skip_desktop and not desktop_app_id.startswith("OpenAI.Codex_"):
         raise ValueError("A verified OpenAI.Codex desktop application is required.")
     ocx = opencodex_plan(root, old)
+    if ocx["mode"] == "managed":
+        ocx["codex_binary"] = str(codex)
     codex_home = Path(os.environ["CODEX_HOME"]).expanduser().resolve() if os.environ.get("CODEX_HOME") else ((root / "codex-profile") if skip_desktop else Path.home() / ".codex")
     ocx.setdefault("codex_home", str(codex_home))
     api = port(old["api_port"]) if "api_port" in old else available_port(8081)
@@ -211,6 +213,9 @@ def client_for(plan: dict):
     client = OpenCodex(plan["command"], opencodex_home=plan["home"])
     client.env["CODEX_HOME"] = plan["codex_home"]
     client.env["OPENCODEX_CODEX_SHIM_AUTO_RESTORE"] = "0"
+    if plan["mode"] == "managed":
+        root = Path(plan["home"]).parent
+        client.env["CODEX_CLI_PATH"] = str(owned_file(root, Path(plan["codex_binary"])))
     client.scope["codex_home"] = plan["codex_home"]
     return client
 
@@ -433,6 +438,62 @@ def restore_codex_route(root: Path, plan: dict) -> None:
     journal.unlink()
 
 
+def registration_diagnostic(root: Path, plan: dict, result: dict) -> dict:
+    """Publish only known result codes and owned-model metadata, never raw state."""
+    def code(value, allowed):
+        return value if isinstance(value, str) and value in allowed else "unknown"
+
+    public = {
+        "phase": code(result.get("phase"), {"installing", "installed", "detaching", "detached"}),
+        "catalog_status": code(result.get("catalog_status"), {"pending", "synced"}),
+        "catalog_degraded": result.get("catalog_degraded") is True,
+        "catalog_notices": [v for v in result.get("catalog_notices", []) if isinstance(v, str) and v in {"fallback", "provider-network", "provider-auth"}],
+    }
+    for key in ("changed", "restart_performed", "native_config_unchanged"):
+        public[key] = result.get(key) if type(result.get(key)) is bool else None
+    sync = result.get("catalog_diagnostic", {})
+    sync = sync if isinstance(sync, dict) else {}
+    sync_public = {
+        "code": code(sync.get("code"), {"not_attempted", "integration_not_off", "cli_success", "cli_nonzero", "cli_timeout", "cli_output_invalid", "cli_launch_failed"}),
+        "exit_code": sync.get("exit_code") if type(sync.get("exit_code")) is int else None,
+        "refusal_code": code(sync.get("refusal_code"), {"service-home", "config", "generation", "external-provider", "native-integration-policy", "native-external-provider"}),
+    }
+    integration_off = None
+    try:
+        config = read_json(Path(plan["home"]) / "config.json")
+        integration_off = config.get("clientIntegrations", {}).get("codex") is False
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    path = Path(plan["codex_home"]) / "opencodex-catalog.json"
+    catalog = {"exists": path.is_file(), "read_status": "missing", "model_count": None, "owned_model_count": None, "owned_models": []}
+    if catalog["exists"]:
+        try:
+            rows = read_json(path).get("models")
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                catalog["read_status"] = "invalid_models"
+            else:
+                owned = [row for row in rows if row.get("slug") == "chatgpt-web2api/auto"]
+                catalog.update(read_status="ok", model_count=len(rows), owned_model_count=len(owned))
+                for row in owned[:10]:
+                    modalities = row.get("input_modalities")
+                    catalog["owned_models"].append({
+                        "slug": "chatgpt-web2api/auto",
+                        "display_name": code(row.get("display_name"), {"ChatGPT Web2API"}),
+                        "input_modalities": modalities if isinstance(modalities, list) and len(modalities) <= 10 and all(isinstance(v, str) and v in {"text", "image", "audio", "video"} for v in modalities) else "unexpected",
+                        "supported_reasoning_levels": [] if row.get("supported_reasoning_levels") == [] else "nonempty_or_invalid",
+                    })
+        except (ValueError, AttributeError, TypeError):
+            catalog["read_status"] = "invalid_json"
+        except OSError:
+            catalog["read_status"] = "unreadable"
+    diagnostic = {"schema": 1, "result": public, "integration_off": integration_off, "sync": sync_public, "catalog": catalog}
+    destination = root / "logs/codex-registration-diagnostic.json"
+    no_links(destination)
+    write_json(destination, diagnostic, root / "backups/diagnostics")
+    print("Codex registration diagnostic: " + json.dumps(diagnostic, ensure_ascii=True))
+    return diagnostic
+
+
 def register(root: Path) -> dict:
     import codex_provider
 
@@ -448,8 +509,9 @@ def register(root: Path) -> dict:
     client = client_for(plan)
     with provider_environment(plan):
         result = codex_provider.install(root, plan["command"], manifest["api_port"], opencodex_home=plan["home"], runner=lambda command, **kwargs: subprocess.run(command, **{**kwargs, "env": client.env}), request=client.request)
+    registration_diagnostic(root, plan, result)
     if result.get("catalog_status") != "synced":
-        raise RuntimeError("OpenCodex catalog refresh remains pending. Retry the installer; no service was restarted.")
+        raise RuntimeError("OpenCodex catalog refresh remains pending. See logs/codex-registration-diagnostic.json; retry the installer. No service was restarted.")
     if plan["mode"] == "managed":
         # The provider transaction already refreshes the catalog. A second CLI
         # sync also checks the machine-wide service owner and can reject an

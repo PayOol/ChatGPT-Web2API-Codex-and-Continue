@@ -1,5 +1,6 @@
 """Owned Codex installation fixtures; never install software or touch user profiles."""
 
+import base64
 import json
 import os
 import re
@@ -70,6 +71,32 @@ def test_headless_configuration_is_explicit_and_never_claims_desktop_installed(d
 def test_explicit_codex_home_is_respected_in_headless_installation(distribution):
     manifest = configure(distribution, skip_desktop=True)
     assert manifest["opencodex"]["codex_home"] == os.environ["CODEX_HOME"]
+
+
+def test_managed_opencodex_uses_private_codex_without_global_path(distribution, monkeypatch):
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv("CODEX_CLI_PATH", raising=False)
+    manifest = configure(distribution, skip_desktop=True)
+    plan = manifest["opencodex"]
+    assert plan["codex_binary"] == manifest["codex"]
+    client = setup.client_for(plan)
+    assert client.env["CODEX_CLI_PATH"] == manifest["codex"]
+    assert "CODEX_CLI_PATH" not in os.environ
+    assert "CODEX_CLI_PATH" not in json.loads((distribution[0] / "environment.json").read_text())
+
+
+@pytest.mark.parametrize("inherited", [None, "personal-codex.exe"])
+def test_existing_opencodex_cli_override_is_not_added_or_changed(distribution, monkeypatch, inherited):
+    if inherited is None:
+        monkeypatch.delenv("CODEX_CLI_PATH", raising=False)
+    else:
+        monkeypatch.setenv("CODEX_CLI_PATH", inherited)
+    write_json(distribution[1] / ".opencodex/config.json", {"existing": True})
+    plan = configure(distribution, skip_desktop=True)["opencodex"]
+    assert plan["mode"] == "existing"
+    assert "codex_binary" not in plan
+    assert setup.client_for(plan).env.get("CODEX_CLI_PATH") == inherited
+    assert os.environ.get("CODEX_CLI_PATH") == inherited
 
 
 def test_missing_desktop_rejected_before_writing_config(distribution):
@@ -358,6 +385,75 @@ def test_doctor_detects_config_drift(distribution):
         setup.examine(root, offline=True)
 
 
+def test_pending_registration_publishes_diagnostics_without_bypassing_failure(distribution, monkeypatch, capsys):
+    import codex_provider
+
+    root, plan, config = route_fixture(distribution)
+    monkeypatch.setattr(codex_provider, "install", lambda *_a, **_k: {
+        "phase": "installed", "catalog_status": "pending", "catalog_degraded": True,
+        "catalog_notices": ["provider-auth"], "native_config_unchanged": True,
+        "catalog_diagnostic": {"code": "cli_nonzero", "exit_code": 1, "refusal_code": "service-home"},
+    })
+    monkeypatch.setattr(setup, "client_for", lambda _: SimpleNamespace(env={}, request=lambda *_: None))
+    monkeypatch.setattr(setup, "start_opencodex", lambda *_: None)
+    config.write_text('# preserved native settings\nmodel = "personal"\n')
+    before = config.read_bytes()
+    with pytest.raises(RuntimeError, match="remains pending"):
+        setup.register(root)
+    diagnostic = json.loads((root / "logs/codex-registration-diagnostic.json").read_text())
+    assert diagnostic["result"]["catalog_status"] == "pending"
+    assert diagnostic["integration_off"] is True
+    assert diagnostic["sync"] == {"code": "cli_nonzero", "exit_code": 1, "refusal_code": "service-home"}
+    assert diagnostic["catalog"]["model_count"] == 0
+    assert diagnostic["catalog"]["owned_model_count"] == 0
+    assert "Codex registration diagnostic:" in capsys.readouterr().out
+    assert config.read_bytes() == before
+    assert not (root / "codex-route-state.json").exists()
+    assert setup.check_installation(root)["registration"] == "pending"
+
+
+def test_registration_diagnostic_exposes_only_public_owned_metadata(distribution, capsys):
+    root, plan, _ = route_fixture(distribution)
+    secret = "private-token-never-export"
+    owned = {"slug": "chatgpt-web2api/auto", "display_name": "ChatGPT Web2API", "input_modalities": ["text", "image"], "supported_reasoning_levels": []}
+    write_json(Path(plan["home"]) / "config.json", {"clientIntegrations": {"codex": False}, "secret": secret})
+    write_json(Path(plan["codex_home"]) / "opencodex-catalog.json", {"models": [{"slug": secret}, {**owned, "secret": secret}]})
+    result = setup.registration_diagnostic(root, plan, {
+        "phase": "installed", "catalog_status": "pending", "secret": secret,
+        "catalog_notices": ["fallback", secret], "catalog_diagnostic": {"code": secret, "exit_code": 1, "stdout": secret},
+    })
+    assert result["catalog"]["model_count"] == 2
+    assert result["catalog"]["owned_models"] == [owned]
+    assert result["sync"]["code"] == "unknown"
+    assert result["result"]["catalog_notices"] == ["fallback"]
+    output = (root / "logs/codex-registration-diagnostic.json").read_text() + capsys.readouterr().out
+    assert secret not in output
+    assert str(root) not in output
+
+
+@pytest.mark.parametrize("contents, expected", [(None, "missing"), ("{invalid", "invalid_json"), ('{"models": null}', "invalid_models")])
+def test_registration_diagnostic_reports_missing_or_invalid_catalog(distribution, contents, expected):
+    root, plan, _ = route_fixture(distribution)
+    catalog = Path(plan["codex_home"]) / "opencodex-catalog.json"
+    if contents is None:
+        catalog.unlink()
+    else:
+        catalog.write_text(contents)
+    result = setup.registration_diagnostic(root, plan, {"catalog_status": "pending"})
+    assert result["catalog"]["read_status"] == expected
+    assert result["catalog"]["model_count"] is None
+
+
+def test_registration_diagnostic_redacts_unexpected_owned_metadata(distribution):
+    root, plan, _ = route_fixture(distribution)
+    secret = "private-value"
+    write_json(Path(plan["codex_home"]) / "opencodex-catalog.json", {"models": [{"slug": "chatgpt-web2api/auto", "display_name": secret, "input_modalities": [secret], "supported_reasoning_levels": [{"description": secret}]}]})
+    result = setup.registration_diagnostic(root, plan, {"catalog_status": "pending"})
+    assert secret not in json.dumps(result)
+    assert result["catalog"]["owned_model_count"] == 1
+    assert result["catalog"]["owned_models"][0]["supported_reasoning_levels"] == "nonempty_or_invalid"
+
+
 def test_installer_uses_private_dependencies_and_consistent_progress():
     text = (SOURCE / "installer/Setup-Codex.ps1").read_text()
     expected = int(re.search(r"InstallStepCount=(\d+)", text)[1])
@@ -376,6 +472,34 @@ def test_powershell_files_parse_without_execution():
     quoted = ",".join("'" + str(path).replace("'", "''") + "'" for path in files)
     script = f"$ErrorActionPreference='Stop'; foreach ($f in @({quoted})) {{ $t=$null; $e=$null; [Management.Automation.Language.Parser]::ParseFile($f,[ref]$t,[ref]$e) | Out-Null; if ($e.Count) {{ throw ($e | Out-String) }} }}"
     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell ownership check")
+@pytest.mark.parametrize("browser_owner", [44, 99])
+def test_pending_login_requires_owned_browser_listener(tmp_path, browser_owner):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "stderr.log").write_text("Auth failed: No access token - waiting for login\n", encoding="utf-8")
+
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    script = f"""
+$ErrorActionPreference='Stop'
+$ast=[Management.Automation.Language.Parser]::ParseFile({quote(SOURCE / 'installer/Start-Codex.ps1')},[ref]$null,[ref]$null)
+$definition=$ast.FindAll({{param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-BridgeAwaitingLogin'}},$true)
+Invoke-Expression $definition.Extent.Text
+$root={quote(tmp_path)}
+$logs={quote(logs)}
+$runtimeManifest=[pscustomobject]@{{browser=(Join-Path $root 'chrome.exe');cdp_port=9223}}
+function Get-CimInstance {{ [pscustomobject]@{{ProcessId=44;ExecutablePath=$runtimeManifest.browser;CommandLine=('chrome.exe --user-data-dir="'+(Join-Path $root 'browser-profile')+'"')}} }}
+function Get-NetTCPConnection {{ [pscustomobject]@{{OwningProcess={browser_owner}}} }}
+$owned=@([pscustomobject]@{{ProcessId=12;CreationDate=[DateTime]::Now.AddSeconds(-10)}})
+if ((Test-BridgeAwaitingLogin $owned) -ne ${'true' if browser_owner == 44 else 'false'}) {{ throw 'Incorrect pending-login ownership result' }}
+"""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], capture_output=True, timeout=20)
     assert result.returncode == 0, result.stderr.decode(errors="replace")
 
 

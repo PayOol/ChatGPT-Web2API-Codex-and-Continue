@@ -155,7 +155,8 @@ def ocx(tmp_path):
 def test_coexistence_exact_metadata_and_no_native_tool_changes(ocx, capsys):
     result = ocx.configure()
     assert result == {"provider": cp.PROVIDER, "model": "chatgpt-web2api/auto", "phase": "installed", "changed": True,
-                      "catalog_status": "synced", "catalog_degraded": False, "catalog_notices": [], "picker_visibility": "not_verified", "restart_performed": False, "native_config_unchanged": True}
+                      "catalog_status": "synced", "catalog_degraded": False, "catalog_notices": [], "picker_visibility": "not_verified", "restart_performed": False, "native_config_unchanged": True,
+                      "catalog_diagnostic": {"catalog_refresh": {"status": "committed"}}}
     provider = ocx.config["providers"][cp.PROVIDER]
     assert provider["baseUrl"] == "http://127.0.0.1:8080/codex/v1"
     assert provider["adapter"] == "openai-chat"
@@ -570,3 +571,145 @@ def test_command_prefix_rejects_credentials_before_persisting_state(ocx):
     with pytest.raises(cp.IntegrationError):
         ocx.configure(prefix=["ocx", "--api-key", "secret"])
     assert not (ocx.root / cp.STATE_FILE).exists()
+
+
+@pytest.mark.parametrize("operation", ["install", "retry", "detach"])
+def test_foreign_provider_deletion_is_detected_even_when_catalog_is_preserved(ocx, operation):
+    ocx.config["providers"]["copilot"] = {"adapter": "openai-chat", "apiKey": "FOREIGN-CREDENTIAL"}
+    ocx.catalog["copilot/model"] = {"display_name": "Existing model"}
+    ocx.save()
+    ocx.save_catalog()
+    if operation != "install":
+        if operation == "retry":
+            ocx.refresh = {"status": "skipped", "reason": "busy"}
+        ocx.configure()
+        ocx.refresh = {"status": "committed", "degraded": False}
+    before_toml = ocx.toml.read_bytes()
+
+    def concurrent_deletion(method, path, body):
+        result = ocx.request(method, path, body)
+        ocx.config["providers"].pop("copilot", None)
+        ocx.save()
+        return result
+
+    options = {**ocx.options, "request": concurrent_deletion}
+    with pytest.raises(cp.CoexistenceChanged) as error:
+        if operation == "detach":
+            cp.detach(ocx.root, ["ocx"], **options)
+        else:
+            cp.configure(ocx.root, ["ocx"], 8080, **options)
+    assert 'provider IDs: ["copilot"]' in str(error.value)
+    assert "FOREIGN-CREDENTIAL" not in str(error.value)
+    assert "FOREIGN-CREDENTIAL" not in json.dumps(ocx.journal())
+    assert ocx.journal()["provider"] is not None
+    assert "copilot" not in ocx.config["providers"]  # No whole-file restoration.
+    assert "copilot/model" in ocx.catalog
+    assert ocx.toml.read_bytes() == before_toml
+
+
+@pytest.mark.parametrize("field", ["defaultProvider", "combos", "modelAliases", "credential"])
+def test_foreign_provider_edits_and_protected_routing_changes_are_detected(ocx, field):
+    ocx.config["modelAliases"] = {"before": "existing/original"}
+    ocx.save()
+
+    def concurrent_edit(method, path, body):
+        result = ocx.request(method, path, body)
+        if field == "credential":
+            ocx.config["providers"]["existing"]["apiKey"] = "CHANGED-PRIVATE-VALUE"
+        elif field == "defaultProvider":
+            ocx.config[field] = "openai"
+        else:
+            ocx.config[field] = {"CHANGED-PRIVATE-VALUE": {"target": "openai"}}
+        ocx.save()
+        return result
+
+    with pytest.raises(cp.CoexistenceChanged) as error:
+        cp.configure(ocx.root, ["ocx"], 8080, **{**ocx.options, "request": concurrent_edit})
+    assert "CHANGED-PRIVATE-VALUE" not in str(error.value)
+    assert "CHANGED-PRIVATE-VALUE" not in json.dumps(ocx.journal())
+    assert "OTHER-PROVIDER-SECRET" not in str(error.value)
+    assert ocx.journal()["model"] is not None
+    if field == "credential":
+        assert 'provider IDs: ["existing"]' in str(error.value)
+        assert ocx.config["providers"]["existing"]["apiKey"] == "CHANGED-PRIVATE-VALUE"
+    else:
+        assert "protected routing changed: true" in str(error.value)
+
+
+def test_foreign_provider_discovery_status_and_count_can_change(ocx):
+    ocx.config["providers"]["existing"]["initialModelSelection"] = {
+        "version": 1, "registrationId": "foreign-registration", "status": "pending", "modelCount": 0,
+    }
+    ocx.save()
+
+    def discovery_progress(method, path, body):
+        result = ocx.request(method, path, body)
+        ocx.config["providers"]["existing"]["initialModelSelection"].update(status="ready", modelCount=2)
+        ocx.save()
+        return result
+
+    result = cp.configure(ocx.root, ["ocx"], 8080, **{**ocx.options, "request": discovery_progress})
+    assert result["catalog_status"] == "synced"
+    assert result["native_config_unchanged"] is True
+
+
+def test_foreign_provider_removal_before_retry_is_not_restored_or_attributed_to_retry(ocx):
+    ocx.refresh = {"status": "skipped", "reason": "busy"}
+    ocx.configure()
+    del ocx.config["providers"]["openai"]
+    ocx.save()
+    ocx.refresh = {"status": "committed", "degraded": False}
+    assert ocx.configure()["catalog_status"] == "synced"
+    assert "openai" not in ocx.config["providers"]
+
+
+@pytest.mark.parametrize("outcome,code", [(0, "cli_success"), (7, "cli_nonzero"), ("timeout", "cli_timeout"), ("missing", "cli_launch_failed")])
+def test_fresh_off_sync_emits_only_sanitized_diagnostic_without_a_catalog(ocx, outcome, code):
+    ocx.config["clientIntegrations"] = {"codex": False}
+    ocx.save()
+    ocx.refresh = {"status": "skipped", "reason": "not-requested"}
+    (ocx.codex_home / "opencodex-catalog.json").unlink()
+
+    def failed_sync(argv, **kwargs):
+        if argv[-1] != "sync":
+            return ocx.run(argv, **kwargs)
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, 60, output="PRIVATE-OUTPUT", stderr="PRIVATE-ERROR")
+        if outcome == "missing":
+            raise OSError("PRIVATE-ERROR")
+        return SimpleNamespace(returncode=outcome, stdout="PRIVATE-OUTPUT", stderr="PRIVATE-ERROR")
+
+    result = cp.configure(ocx.root, ["ocx"], 8080, **{**ocx.options, "runner": failed_sync})
+    assert result["catalog_status"] == "pending"  # Exit 0 alone is insufficient.
+    diagnostic = {"code": code, "exit_code": outcome if type(outcome) is int else None,
+                  "catalog_exists": False, "owned_catalog_verified": False, "detached": False,
+                  "catalog_refresh": {"status": "skipped", "reason": "not-requested"}}
+    assert result["catalog_diagnostic"] == diagnostic
+    assert ocx.journal()["catalog_diagnostic"] == diagnostic
+    log = (ocx.root / "logs/codex-provider-diagnostic.json").read_text(encoding="utf-8")
+    assert json.loads(log) == diagnostic
+    assert "PRIVATE" not in log and str(ocx.home) not in log
+
+
+@pytest.mark.parametrize("refresh,expected", [
+    ({"status": "skipped", "reason": "catalog-unavailable"},
+     {"status": "skipped", "reason": "catalog-unavailable"}),
+    ({"status": "failed", "reason": "disk", "phase": "commit",
+      "cause": {"kind": "io", "code": "ENOENT", "message": "PRIVATE-PATH"}},
+     {"status": "failed", "reason": "disk", "phase": "commit", "cause": {"kind": "io", "code": "ENOENT"}}),
+    ({"status": "PRIVATE-STATUS", "reason": ["PRIVATE"], "phase": "PRIVATE-PATH",
+      "cause": {"kind": "PRIVATE-ERROR", "code": "PRIVATE-PATH"}}, {}),
+])
+def test_public_catalog_refresh_codes_survive_cli_retry_without_private_details(ocx, refresh, expected):
+    ocx.config["clientIntegrations"] = {"codex": False}
+    ocx.save()
+    ocx.refresh = {**refresh, "error": "PRIVATE-ERROR", "path": "PRIVATE-PATH"}
+    ocx.sync = {"ok": False}
+    result = ocx.configure()
+    diagnostic = result["catalog_diagnostic"]
+    assert diagnostic["code"] == "cli_nonzero"
+    assert diagnostic["catalog_refresh"] == expected
+    assert ocx.journal()["catalog_diagnostic"] == diagnostic
+    log = (ocx.root / "logs/codex-provider-diagnostic.json").read_text(encoding="utf-8")
+    assert json.loads(log) == diagnostic
+    assert "PRIVATE" not in log

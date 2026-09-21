@@ -42,6 +42,10 @@ class NativeSettingsChanged(IntegrationError):
     """A concurrent writer or unsupported OpenCodex behavior changed native settings."""
 
 
+class CoexistenceChanged(IntegrationError):
+    """Unowned providers or protected routing changed during this operation."""
+
+
 def _read(path: Path) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -127,6 +131,33 @@ def _provider_identity(value: dict | None) -> dict | None:
     return result
 
 
+def _coexistence_snapshot(config: dict) -> dict:
+    return {
+        "providers": {name: _provider_identity(provider)
+                      for name, provider in config.get("providers", {}).items() if name != PROVIDER},
+        "routing": {key: copy.deepcopy(config[key])
+                    for key in ("defaultProvider", "combos", "modelAliases") if key in config},
+    }
+
+
+def _check_coexistence(before: dict, after: dict) -> None:
+    if before == after:
+        return
+    providers_before, providers_after = before["providers"], after["providers"]
+    changed = sorted(name for name in providers_before.keys() | providers_after.keys()
+                     if name not in providers_before or name not in providers_after
+                     or providers_before[name] != providers_after[name])
+    # Include only bounded provider identifiers, never credential/config/alias values.
+    public_ids = [name if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", name) else "<invalid-id>"
+                  for name in changed[:20]]
+    routing_changed = before["routing"] != after["routing"]
+    raise CoexistenceChanged(
+        f"OpenCodex coexistence changed during this operation; provider IDs: {json.dumps(public_ids)}; "
+        f"protected routing changed: {str(routing_changed).lower()}. "
+        "The owned-entry journal was retained. No global configuration was restored."
+    ) from None
+
+
 def _models(config: dict) -> list:
     return [row for row in config.get("customModels", []) if row.get("provider") == PROVIDER]
 
@@ -196,6 +227,7 @@ class OpenCodex:
         self.opener = build_opener(ProxyHandler({}), _NoRedirect())
         self.base = None
         self.token = None
+        self.sync_diagnostic = {"code": "not_attempted", "exit_code": None}
 
     def preflight(self) -> dict:
         try:
@@ -230,14 +262,26 @@ class OpenCodex:
         # Only this explicit CLI path sets catalogEvenWhenNotInjected. /api/sync
         # does not, and normal integration-ON sync runs the native TOML injector.
         if self.config().get("clientIntegrations", {}).get("codex") is not False:
+            self.sync_diagnostic = {"code": "integration_not_off", "exit_code": None}
             return False
         try:
             result = self.runner(
                 [*self.command, "sync"], capture_output=True, text=True,
                 encoding="utf-8", errors="strict", shell=False, env=self.env, timeout=60,
             )
+            self.sync_diagnostic = {
+                "code": "cli_success" if result.returncode == 0 else "cli_nonzero",
+                "exit_code": result.returncode,
+            }
             return result.returncode == 0
-        except (OSError, subprocess.SubprocessError, UnicodeError):
+        except subprocess.TimeoutExpired:
+            self.sync_diagnostic = {"code": "cli_timeout", "exit_code": None}
+            return False
+        except UnicodeError:
+            self.sync_diagnostic = {"code": "cli_output_invalid", "exit_code": None}
+            return False
+        except (OSError, subprocess.SubprocessError):
+            self.sync_diagnostic = {"code": "cli_launch_failed", "exit_code": None}
             return False
 
     def _http(self, method, path, body=None, headers=None):
@@ -322,6 +366,28 @@ def _assert_owned(config: dict, state: dict, *, missing_ok=False):
 
 def _catalog_status(response: dict, client: OpenCodex, state: dict, *, detached=False) -> str:
     refresh = response.get("catalogRefresh", {})
+    refresh = refresh if isinstance(refresh, dict) else {}
+    # Closed vocabularies from OpenCodex 2.59's CatalogDisposition/FailureCause.
+    # Keep the API outcome when a later CLI retry supplies its own diagnostics.
+    allowed = {
+        "status": {"committed", "skipped", "failed"},
+        "reason": {"not-requested", "catalog-unavailable", "busy", "stale", "refused",
+                   "provider-auth", "provider-network", "disk", "request-invalid", "admission", "internal"},
+        "phase": {"gather", "commit"},
+    }
+    public = {key: refresh[key] for key, values in allowed.items()
+              if isinstance(refresh.get(key), str) and refresh[key] in values}
+    cause = refresh.get("cause")
+    if isinstance(cause, dict):
+        allowed_cause = {
+            "kind": {"invalid-request", "lock-busy", "io", "unknown"},
+            "code": {"ENOSPC", "EACCES", "EPERM", "EROFS", "ENOENT", "SQLITE_BUSY"},
+        }
+        public_cause = {key: cause[key] for key, values in allowed_cause.items()
+                        if isinstance(cause.get(key), str) and cause[key] in values}
+        if public_cause:
+            public["cause"] = public_cause
+    state["catalog_diagnostic"] = {"catalog_refresh": public}
     # These are OpenCodex 2.59's complete, sanitized CatalogNotice codes. Never
     # persist free-form upstream errors or infer that unrelated providers are healthy.
     notices = refresh.get("notices", [])
@@ -358,6 +424,7 @@ def _native_settings_guard(client: OpenCodex):
     homes = {Path(client.scope["codex_home"]), Path.home() / ".codex"}
     paths = [home / "config.toml" for home in homes]
     before = {path: path.read_bytes() if path.exists() else None for path in paths}
+    foreign_before = _coexistence_snapshot(client.config()) if (client.home / "config.json").is_file() else None
     catalog = Path(client.scope["codex_home"]) / "opencodex-catalog.json"
     previous_slugs = set()
     if catalog.is_file():
@@ -366,6 +433,8 @@ def _native_settings_guard(client: OpenCodex):
     try:
         yield
     finally:
+        if foreign_before is not None:
+            _check_coexistence(foreign_before, _coexistence_snapshot(client.config()))
         after = {path: path.read_bytes() if path.exists() else None for path in paths}
         if after != before:
             raise NativeSettingsChanged(
@@ -380,7 +449,16 @@ def _native_settings_guard(client: OpenCodex):
 
 def _sync(client: OpenCodex, state: dict, *, detached=False) -> str:
     if client.config().get("clientIntegrations", {}).get("codex") is False:
-        if client.sync_catalog_only() and _catalog_matches(client, detached=detached):
+        succeeded = client.sync_catalog_only()
+        verified = _catalog_matches(client, detached=detached)
+        state["catalog_diagnostic"] = {
+            **state.get("catalog_diagnostic", {}),
+            **client.sync_diagnostic,
+            "catalog_exists": (Path(client.scope["codex_home"]) / "opencodex-catalog.json").is_file(),
+            "owned_catalog_verified": verified,
+            "detached": detached,
+        }
+        if succeeded and verified:
             return "synced"
         return "pending"
     # Retry catalog convergence via the unchanged owned model only. This route
@@ -406,7 +484,17 @@ def _result(state: dict, changed: bool) -> dict:
         "picker_visibility": "not_verified",
         "restart_performed": False,
         "native_config_unchanged": True,
+        **({"catalog_diagnostic": copy.deepcopy(state["catalog_diagnostic"])}
+           if "catalog_diagnostic" in state else {}),
     }
+
+
+def _save_catalog_diagnostic(root: Path, state: dict) -> None:
+    """Small CI artifact, containing codes/booleans only; no paths or CLI output."""
+    if "catalog_diagnostic" in state:
+        logs = root / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        _write(logs / "codex-provider-diagnostic.json", state["catalog_diagnostic"])
 
 
 def install(root: Path, command_prefix: Sequence[str], api_port: int | None = None, **client_options) -> dict:
@@ -470,6 +558,7 @@ def install(root: Path, command_prefix: Sequence[str], api_port: int | None = No
             state["catalog_status"] = _sync(client, state)
         state["phase"] = "installed"
         _write(path, state)
+        _save_catalog_diagnostic(root, state)
         return _result(state, changed)
 
 
@@ -511,6 +600,7 @@ def detach(root: Path, command_prefix: Sequence[str], config_path: Path | None =
             state["catalog_status"] = _sync(client, state, detached=True)
         state["phase"] = "detached"
         _write(path, state)
+        _save_catalog_diagnostic(root, state)
         return _result(state, changed)
 
 

@@ -28,6 +28,22 @@ function Assert-PortOwner($Processes) {
     if (@($listeners | Where-Object { $_.OwningProcess -notin $ids }).Count) { throw 'Le port API est occupe par un autre service. Aucun processus tiers ne sera arrete.' }
     return $listeners
 }
+function Test-BridgeAwaitingLogin($Processes) {
+    if (-not @($Processes).Count) { return $false }
+    $authLog=Join-Path $logs 'stderr.log'
+    if (-not (Test-Path -LiteralPath $authLog)) { return $false }
+    if (-not (Get-Content -LiteralPath $authLog -Tail 30 | Select-String 'Auth failed: .*waiting for login')) { return $false }
+    $created=($Processes | Sort-Object CreationDate | Select-Object -First 1).CreationDate
+    if ((Get-Item -LiteralPath $authLog).LastWriteTimeUtc -lt $created.ToUniversalTime()) { return $false }
+    $profile=Join-Path $root 'browser-profile'
+    $profileArgument='--user-data-dir(?:=|\s+)(?:"'+[regex]::Escape($profile)+'"|'+[regex]::Escape($profile)+')(?=\s|$)'
+    $browsers=@(Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object {
+        $_.ExecutablePath -eq $runtimeManifest.browser -and $_.CommandLine -match $profileArgument -and $_.CommandLine -notlike '*--type=*'
+    })
+    $browserIds=@($browsers | ForEach-Object { $_.ProcessId })
+    $cdp=@(Get-NetTCPConnection -LocalPort $runtimeManifest.cdp_port -State Listen -ErrorAction SilentlyContinue)
+    return ($cdp.Count -gt 0 -and @($cdp | Where-Object { $_.OwningProcess -notin $browserIds }).Count -eq 0)
+}
 try {
     if (-not $ServiceOnly -and -not $SkipDesktop) {
         $desktop=Get-AppxPackage -Name OpenAI.Codex -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -58,13 +74,21 @@ try {
         Start-Process -FilePath $python -ArgumentList @('-u','-m','chatgpt_web2api','--config',('"'+$configFile+'"')) -WindowStyle Hidden -WorkingDirectory $root -RedirectStandardOutput (Join-Path $logs 'stdout.log') -RedirectStandardError (Join-Path $logs 'stderr.log') | Out-Null
     }
     $deadline=[DateTime]::UtcNow.AddSeconds(60)
+    $awaitingLogin=$false
     do {
         $owned=@(Get-OwnedBridge)
         $listeners=@(Assert-PortOwner $owned)
         if ($listeners.Count -and $owned.Count) { break }
+        $awaitingLogin=Test-BridgeAwaitingLogin $owned
+        if ($awaitingLogin) { break }
         Start-Sleep -Milliseconds 500
     } while ([DateTime]::UtcNow -lt $deadline)
-    if (-not $listeners.Count) { throw 'La passerelle ne repond pas sur son port. Consulter logs\stderr.log.' }
+    if ($awaitingLogin) {
+        $notice='Passerelle demarree ; connexion ChatGPT requise dans le navigateur dedie. API en attente de connexion.'
+        Write-Host $notice
+        Add-Content -LiteralPath (Join-Path $logs 'launcher.log') -Value ((Get-Date -Format o)+' '+$notice)
+    }
+    elseif (-not $listeners.Count) { throw 'La passerelle ne repond pas sur son port. Consulter logs\stderr.log.' }
     # Python starts only the recorded managed proxy; existing OpenCodex is never restarted.
     & $python $configure --root $root --start-opencodex
     if ($LASTEXITCODE -ne 0) { throw 'OpenCodex gere indisponible. Consulter les journaux.' }
