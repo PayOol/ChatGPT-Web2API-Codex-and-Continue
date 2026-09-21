@@ -20,6 +20,8 @@ La distribution a été construite et vérifiée sous Windows x64 le 21 septembr
 
 Les suites historiques et les régressions de l'intégration sont conservées. Les simulations anciennes ont été adaptées aux clics CDP, à la lecture des alertes localisées, à l'isolation des conversations et à la récupération du texte corrélé côté serveur. Les protections contre les renvois incertains restent actives.
 
+Résultat local de la suite complète : **799 tests réussis**, 4 sous-tests réussis, 31 scénarios E2E exclus explicitement. Après la dernière correction du comptage des échecs d'envoi, les 31 tests concernés ont été rejoués avec succès.
+
 Les tests de distribution couvrent l'application idempotente des correctifs, le refus d'une version incompatible avant toute écriture, les sauvegardes, la préservation des modèles ajoutés par l'utilisateur, les ports occupés et le refus de modifier une extension extérieure.
 
 Les bundles Continue réellement installés passent **264 vérifications d'accès automatique portant sur 86 outils** et **31 vérifications de compaction**. Les réponses du modèle sont simulées pour ces tests de compaction ; il ne s'agit pas d'une preuve de résumé réellement produit par ChatGPT.
@@ -33,3 +35,5 @@ La connexion ChatGPT du destinataire, ses connexions Codex/apps/Hostinger et les
 Les 31 scénarios E2E qui envoient de vraies requêtes à un compte ChatGPT sont exclus de la suite automatique par défaut. Les gestes Computer sont contrôlés au niveau du catalogue et des adaptateurs ; chaque interaction dans chaque application Windows n'a pas été rejouée. Aucune opération distante payante ou destructive n'a été utilisée pour valider cette distribution.
 
 Le workflow GitHub `Windows distribution` exécute les tests, le contrôle de secrets et la compilation. Son option manuelle `install` effectue aussi l'installation complète sur un runner Windows neuf. Les résultats distants sont consultables dans l'onglet Actions du dépôt privé.
+
+L'[exécution d'installation sur Windows neuf](https://github.com/PayOol/ChatGPT-Web2API-Continue/actions/runs/35619928199) a réussi : tous les composants ont été téléchargés et configurés, puis les cinq catalogues MCP ont été vérifiés. Le contrôle distant des secrets a également réussi.

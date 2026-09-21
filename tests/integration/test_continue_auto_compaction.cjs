@@ -106,4 +106,3 @@ const opts={enabled:true};
  ok('Full access patches retained',()=>{assert.ok(core.includes('continue-full-access.local.cjs'));assert.ok(gui.includes('o.content.fullAccess===true'));});
  console.log(JSON.stringify({passed:checks.length,checks},null,2));
 })().catch(e=>{console.error(e);process.exitCode=1;});
-

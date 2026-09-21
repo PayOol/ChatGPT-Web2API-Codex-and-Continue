@@ -37,13 +37,16 @@ class ComposerTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(SEND_BUTTON_BROAD_SELECTOR.count(':not([data-testid="stop-button"])'), 2)
 
     async def test_send_readiness_failure_does_not_claim_sent(self):
+        from chatgpt_web2api.breakers import BreakerKind, BreakerRegistry
+
         d = SimpleNamespace(
             _js_strict=AsyncMock(return_value='{"status":"busy"}'), _cdp=AsyncMock(),
-            _capture_selector_diagnostic=AsyncMock(), _breakers=None,
+            _capture_selector_diagnostic=AsyncMock(), _breakers=BreakerRegistry(),
         )
         with patch("chatgpt_web2api.chatgpt_dom.SEND_BUTTON_POLL_MAX_WAIT_S", 0):
             with self.assertRaisesRegex(SendReadinessError, "not dispatched"):
                 await ChatGPTDom(d).click_send()
+        self.assertEqual(len(d._breakers._states[BreakerKind.COMPOSER_SEND_READINESS].recent_failures), 1)
         d._cdp.assert_not_awaited()
 
 

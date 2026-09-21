@@ -445,7 +445,7 @@ class ChatGPTDom:
                     from .breakers import BreakerKind
 
                     self._driver._breakers.record_failure(
-                        BreakerKind.COMPOSER_SEND_READINESS, result
+                        BreakerKind.COMPOSER_SEND_READINESS
                     )
                 raise SendReadinessError(f"Send not dispatched: composer {result}")
             await asyncio.sleep(SEND_BUTTON_POLL_INTERVAL_S)
