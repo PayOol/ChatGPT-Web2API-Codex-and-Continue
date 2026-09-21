@@ -53,7 +53,9 @@ def publish(data: bytes, origin: str = "tool") -> dict:
         except (ValueError, OSError, KeyError, json.JSONDecodeError):
             pass
     token = uuid.uuid4().hex
-    path = ROOT / (token + "." + extension)
+    # Use the same canonical path on first publication and cache reuse.
+    # Windows can expose TEMP under both an 8.3 alias and its long name.
+    path = (ROOT / (token + "." + extension)).resolve()
     path.write_bytes(data)
     meta = dict(
         file=path.name,

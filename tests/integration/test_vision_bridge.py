@@ -20,7 +20,10 @@ def fixture():
 class VisionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.patch = patch.object(registry, "ROOT", Path(self.tmp.name))
+        # A lexical alias also exercises first-write/cache path normalization.
+        alias = Path(self.tmp.name) / "alias"
+        alias.mkdir()
+        self.patch = patch.object(registry, "ROOT", alias / "..")
         self.patch.start()
 
     def tearDown(self):
