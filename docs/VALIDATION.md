@@ -1,3 +1,9 @@
+# Validation de la distribution 0.4.4
+
+## Progression et outils Codex — 21 septembre 2026
+
+Le transport Responses émet les résumés d'état pendant l'attente et conserve la validation des appels avant exécution. Le parcours réel Codex a reçu ces résumés et exécuté des appels natifs. La récupération d'une réponse terminée a également révélé et corrigé une différence entre le texte utilisateur rendu et sa source. Les contrôles, la migration du fournisseur et les limites de la planification du modèle sont détaillés dans [CODEX-PROGRESS.md](CODEX-PROGRESS.md). Les installations Windows complètes sont rattachées au commit de publication dans GitHub Actions.
+
 # Validation de la distribution 0.4.3
 
 ## Vérification de l'environnement avant réponse — 21 septembre 2026

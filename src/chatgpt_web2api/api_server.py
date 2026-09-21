@@ -34,6 +34,7 @@ from .cdp_driver import (
 from .config import Config
 from .cross_process_lock import LockAcquisitionError
 from .lock_resolver import MutationLock, OwnedTabRequiredError, resolve_mutation_lock
+from .progress import report
 from .tool_bridge import ToolBridge, ToolProtocolError, ToolRequestError
 from .vision_bridge import ImageUploadError, images_for_turn, normalize_images
 
@@ -112,12 +113,18 @@ class APIServer:
         self.app.router.add_get("/health", self._handle_health)
         self.app.router.add_get("/", self._handle_health)
         self.app.router.add_post("/codex/v1/chat/completions", self._handle_codex_chat)
+        self.app.router.add_post("/codex/v1/responses", self._handle_codex_responses)
         self.app.router.add_get("/codex/v1/models", self._handle_codex_models)
 
     async def _handle_codex_chat(self, request):
         from .codex_transport import chat
 
         return await chat(self, request)
+
+    async def _handle_codex_responses(self, request):
+        from .codex_transport import responses
+
+        return await responses(self, request)
 
     async def _handle_codex_models(self, request):
         from .codex_transport import models
@@ -431,6 +438,7 @@ class APIServer:
                 _port, _key = resolve_mutation_lock(self._driver, True)
             else:
                 _port, _key = self._cdp_port, None
+            report("Attente du navigateur disponible.")
             async with MutationLock(_port, _key):
                 # Drift guard (parallel mode only): if the owned target changed
                 # while we waited for the lock, the key we hold no longer names
@@ -512,6 +520,7 @@ class APIServer:
                 if isinstance(self._driver, CDPDriver):
                     await self._driver._dom.check_rate_limit()
                 # Applies to Agent, title generation and apply calls alike.
+                report("Préparation de l'envoi ; respect du délai entre les demandes.")
                 await self._agent_state.reserve()
 
                 # Select model if specified (non-fatal on failure)
@@ -860,6 +869,7 @@ class APIServer:
 
         async def collect(prompt: str, attachments=None, *, repair=False) -> str:
             async def send() -> str:
+                report("Correction du format de la réponse." if repair else "Préparation du message dans ChatGPT.")
                 self._agent_state.begin(
                     request_key,
                     nonce=bridge.nonce,
@@ -907,6 +917,7 @@ class APIServer:
                 answer = await collect(bridge.repair_prompt(exc), repair=True)
                 message = bridge.parse(answer)
 
+        report("Réponse validée ; transmission à Codex.")
         conv_id = self._driver._current_conv_id or ""
         self._remember_agent_reply(request_key, messages, message, scope, conv_id)
         return await self._render_agent_reply(request, model, message, conv_id, stream)

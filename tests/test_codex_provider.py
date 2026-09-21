@@ -104,7 +104,6 @@ class FakeOpenCodex:
         if (method, path) == ("POST", "/api/providers"):
             assert body["name"] == cp.PROVIDER
             assert "setDefault" not in body
-            assert cp.PROVIDER not in self.config["providers"]
             self.config["providers"][cp.PROVIDER] = copy.deepcopy(body["provider"])
             self.config["providers"][cp.PROVIDER]["initialModelSelection"] = {
                 "version": 1, "registrationId": "generated-registration-id", "status": "ready", "modelCount": 1,
@@ -152,6 +151,54 @@ def ocx(tmp_path):
     return FakeOpenCodex(tmp_path)
 
 
+def install_legacy(ocx, monkeypatch):
+    original = cp.provider_entry
+    with monkeypatch.context() as context:
+        context.setattr(cp, "provider_entry", lambda port: {**original(port), "adapter": "openai-chat"})
+        ocx.configure()
+
+
+def test_owned_transport_upgrade_preserves_model_other_providers_and_native_config(ocx, monkeypatch):
+    install_legacy(ocx, monkeypatch)
+    before = copy.deepcopy(ocx.config)
+    native = ocx.toml.read_bytes()
+    result = ocx.configure()
+    assert result["changed"]
+    assert ocx.config["providers"][cp.PROVIDER]["adapter"] == "openai-responses"
+    assert ocx.config["customModels"] == before["customModels"]
+    assert cp._coexistence_snapshot(ocx.config) == cp._coexistence_snapshot(before)
+    assert ocx.toml.read_bytes() == native
+    assert not ocx.configure()["changed"]
+    assert ocx.detach()["phase"] == "detached"
+
+
+@pytest.mark.parametrize("failure", ["fail_before", "fail_after"])
+def test_transport_upgrade_recovers_lost_management_reply(ocx, monkeypatch, failure):
+    install_legacy(ocx, monkeypatch)
+    setattr(ocx, failure, "/api/providers")
+    with pytest.raises(cp.IntegrationError):
+        ocx.configure()
+    assert ocx.journal()["transport_upgrade"]["adapter"] == "openai-responses"
+    setattr(ocx, failure, None)
+    ocx.configure()
+    assert "transport_upgrade" not in ocx.journal()
+    assert ocx.journal()["provider"] == ocx.config["providers"][cp.PROVIDER]
+
+
+def test_transport_upgrade_refuses_user_edit_or_port_change(ocx, monkeypatch):
+    install_legacy(ocx, monkeypatch)
+    before = copy.deepcopy(ocx.config)
+    with pytest.raises(cp.OwnershipConflict):
+        ocx.configure(port=8087)
+    assert ocx.config == before
+    ocx.config["providers"][cp.PROVIDER]["defaultModel"] = "user-chosen"
+    ocx.save()
+    before = copy.deepcopy(ocx.config)
+    with pytest.raises(cp.OwnershipConflict):
+        ocx.configure()
+    assert ocx.config == before
+
+
 def test_coexistence_exact_metadata_and_no_native_tool_changes(ocx, capsys):
     result = ocx.configure()
     assert result == {"provider": cp.PROVIDER, "model": "chatgpt-web2api/auto", "phase": "installed", "changed": True,
@@ -159,7 +206,7 @@ def test_coexistence_exact_metadata_and_no_native_tool_changes(ocx, capsys):
                       "catalog_diagnostic": {"catalog_refresh": {"status": "committed"}}}
     provider = ocx.config["providers"][cp.PROVIDER]
     assert provider["baseUrl"] == "http://127.0.0.1:8080/codex/v1"
-    assert provider["adapter"] == "openai-chat"
+    assert provider["adapter"] == "openai-responses"
     assert provider["apiKey"] == "not-needed"
     assert provider["noReasoningModels"] == ["auto"]
     assert provider["modelInputModalities"] == {"auto": ["text", "image"]}

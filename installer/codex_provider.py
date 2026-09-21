@@ -96,7 +96,7 @@ def _api_port(root: Path, value: int | None) -> int:
 
 def provider_entry(api_port: int) -> dict:
     return {
-        "adapter": "openai-chat",
+        "adapter": "openai-responses",
         "baseUrl": f"http://127.0.0.1:{_port(api_port)}/codex/v1",
         "apiKey": "not-needed",
         "defaultModel": MODEL,
@@ -497,6 +497,40 @@ def _save_catalog_diagnostic(root: Path, state: dict) -> None:
         _write(logs / "codex-provider-diagnostic.json", state["catalog_diagnostic"])
 
 
+def _upgrade_transport(client, path, state, desired):
+    """Migrate only our unchanged 0.4.x Chat adapter; journal lost replies.
+
+    Ports, credentials, unrelated providers and the native configuration stay
+    protected by the same ownership/coexistence checks as installation.
+    """
+    legacy = {**desired, "adapter": "openai-chat"}
+    if state["desired_provider"] != legacy or not state.get("provider"):
+        raise OwnershipConflict("The endpoint differs from the owned installation; detach it before changing ports.")
+    pending = state.get("transport_upgrade")
+    if pending is not None and pending != desired:
+        raise OwnershipConflict("A different transport upgrade is pending.")
+    observed = client.config().get("providers", {}).get(PROVIDER)
+    public = copy.deepcopy(observed)
+    if isinstance(public, dict):
+        public.pop("initialModelSelection", None)
+    if not (pending and public == desired):
+        _assert_owned(client.config(), state)
+        state["transport_upgrade"] = desired
+        _write(path, state)
+        client.request("POST", "/api/providers", {"name": PROVIDER, "provider": desired})
+        observed = client.config().get("providers", {}).get(PROVIDER)
+        public = copy.deepcopy(observed)
+        if isinstance(public, dict):
+            public.pop("initialModelSelection", None)
+        if public != desired:
+            raise OwnershipConflict("Transport update could not be verified; its journal was retained.")
+    state["provider"] = observed
+    state["desired_provider"] = desired
+    state.pop("transport_upgrade", None)
+    _write(path, state)
+    return True
+
+
 def install(root: Path, command_prefix: Sequence[str], api_port: int | None = None, **client_options) -> dict:
     """Register a provider and model; retry safely with the same root and endpoint.
 
@@ -508,6 +542,7 @@ def install(root: Path, command_prefix: Sequence[str], api_port: int | None = No
     client = OpenCodex(command_prefix, **client_options)
     with _locked(root), _native_settings_guard(client):
         config = client.preflight()
+        upgraded = False
         path = root / STATE_FILE
         state = _load_state(path, client)
         if state and state["phase"] == "detaching":
@@ -523,9 +558,10 @@ def install(root: Path, command_prefix: Sequence[str], api_port: int | None = No
                      "phase": "installing", "catalog_status": "pending"}
             _write(path, state)
         elif state["desired_provider"] != desired:
-            raise OwnershipConflict("The endpoint differs from the owned installation; detach it before changing ports.")
+            upgraded = _upgrade_transport(client, path, state, desired)
+            config = client.config()
         _assert_owned(config, state)
-        changed = False
+        changed = upgraded
         if state["provider"] is None:
             # Recheck immediately before the API's upsert; it has no create-only/CAS flag.
             _assert_owned(client.config(), state)

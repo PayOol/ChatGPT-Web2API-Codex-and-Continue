@@ -1725,13 +1725,41 @@ class CDPDriver:
             "var protocol=web2apiAgentText(a);"
             "var c=location.pathname.match(/\\/c\\/([a-zA-Z0-9-]+)(?:\\/|$)/);"
             "return JSON.stringify({conversation:c?c[1]:'',"
+            "user_message_id:u?u.getAttribute('data-message-id'):null,"
+            "user_rendered:!!(u&&u.querySelector('code.user-message-inline-code')),"
             "user:u?((u.querySelector('.rich-text-user-turn,.whitespace-pre-wrap')||u).textContent||''):'',"
             "assistant:protocol.text,literal:protocol.literal,unsafe_markup:protocol.unsafe_markup,"
             "completed:web2apiAgentHasActions(a),"
             "paired:!!(u&&a&&(u.compareDocumentPosition(a)&Node.DOCUMENT_POSITION_FOLLOWING)),"
             "generating:!!document.querySelector('[data-testid=stop-button]')});})()"
         )
-        return json.loads(raw)
+        snapshot = json.loads(raw)
+        if (
+            snapshot.get("user_rendered") and snapshot.get("user_message_id")
+            and snapshot.get("conversation") and snapshot.get("completed")
+            and snapshot.get("paired") and not snapshot.get("generating")
+        ):
+            # ChatGPT renders inline backticks in user turns as <code>, losing
+            # source characters in textContent/innerText. Recover only the exact
+            # DOM message ID from this conversation; callers still compare the
+            # entire original prompt/hash. Never match on a short nonce alone.
+            key = (snapshot["conversation"], snapshot["user_message_id"])
+            cached = getattr(self, "_agent_user_source", None)
+            if cached and cached[0] == key:
+                snapshot["user"] = cached[1]
+            else:
+                try:
+                    projection = await self._backend_client._fetch_recent_conversation_projection(key[0])
+                    matches = [n for n in projection.get("nodes", {}).values()
+                               if n.get("id") == key[1] and n.get("role") == "user"]
+                    if len(matches) == 1 and matches[0].get("text"):
+                        snapshot["user"] = matches[0]["text"]
+                        self._agent_user_source = (key, snapshot["user"])
+                except (AuthExpiredError, RateLimitError):
+                    raise
+                except Exception as exc:
+                    logger.debug("Original user text unavailable: %s", type(exc).__name__)
+        return snapshot
 
     async def send_and_stream(
         self,
@@ -1818,6 +1846,9 @@ class CDPDriver:
                     # submission/response failures as safely retryable.
                     raise ImageUploadError(str(exc)) from exc
             await self.click_send()
+            from .progress import report
+
+            report("Envoi déclenché dans le navigateur ; attente de sa prise en compte.")
 
             # A2 Step 6: wait for the IdentityListener to capture the UUID.
             captured_uuid = None
@@ -1866,6 +1897,8 @@ class CDPDriver:
 
             # A2 Step 7: build the final anchor (fallback + captured UUID).
             turn_anchor = fallback_anchor.with_captured_id(captured_uuid)
+            if captured_uuid:
+                report("Message pris en compte par ChatGPT ; attente de la réponse.")
 
             # A2 Step 8: stream + completion with the anchored turn.
             # Direct callers also wait without a generation deadline by default.

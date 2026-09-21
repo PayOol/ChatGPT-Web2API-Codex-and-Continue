@@ -383,11 +383,16 @@ class CompletionDetector:
                     "(function(){"
                     "  var t = Array.from(document.querySelectorAll('[role=dialog],[role=alert]'))"
                     "    .map(e => e.textContent || '').join('\\n');"
-                    "  return JSON.stringify({text: t.slice(0, 4000)});"
+                    "  return JSON.stringify({text: t.slice(0, 4000),"
+                    "generating:!!document.querySelector('[data-testid=stop-button]')});"
                     "})()"
                 )
                 scan = json.loads(dom_scan)
                 scanned_text = scan.get("text", "") if isinstance(scan, dict) else ""
+                if isinstance(scan, dict) and scan.get("generating") is True:
+                    from .progress import report
+
+                    report("Génération en cours dans ChatGPT ; attente de la réponse.")
             except (CDPJSError, json.JSONDecodeError, TypeError):
                 scanned_text = ""
             if is_rate_limited_text(scanned_text):
@@ -432,6 +437,9 @@ class CompletionDetector:
                 if clean.startswith("```json\n"):
                     clean = clean[8:]
                 if clean.startswith(response_marker):
+                    from .progress import report
+
+                    report("La réponse à cette demande apparaît dans le navigateur.")
                     break
                 if candidate and time.monotonic() - last_progress >= 1.0:
                     # A finished plain-language answer has no protocol nonce.
@@ -659,6 +667,12 @@ class CompletionDetector:
             child_count = data.get("child_count", 0)
             has_action = data.get("has_action", False)
             is_thinking = data.get("is_thinking", False)
+            from .progress import report
+
+            if is_thinking:
+                report("ChatGPT indique une réflexion en cours dans le navigateur.")
+            elif md_text:
+                report("Réponse en cours de réception ; validation attendue avant les outils.")
 
             # Streaming source: prefer the clean .markdown answer container
             # over the innerText fallback (which carries the reasoning label).

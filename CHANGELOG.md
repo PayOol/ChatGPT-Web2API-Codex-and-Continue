@@ -1,3 +1,11 @@
+# Distribution 0.4.4
+
+- Affiche dans Codex les étapes horodatées observées par la passerelle pendant la génération, avec maintien de connexion toutes les 15 secondes.
+- Ajoute le transport Responses natif et la migration journalisée du fournisseur possédé par l'installateur ; conserve les outils, résultats, images et permissions du client.
+- Corrige la confusion entre les points d'entrée d'outils et rappelle la découverte du catalogue ainsi que l'initialisation prescrite par le guide Computer Use.
+- Retrouve le texte original d'un message rendu en code en ligne pour reconnaître une réponse terminée et déclencher sa récupération, sans relancer l'action initiale.
+- Décrit les preuves et limites dans [CODEX-PROGRESS.md](docs/CODEX-PROGRESS.md).
+
 # Distribution 0.4.3
 
 - Demande une vérification en lecture seule avant de répondre sur l'accès au PC, une application, un MCP, un service connecté ou l'état réel de l'environnement.

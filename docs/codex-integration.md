@@ -63,7 +63,7 @@ The return value includes:
 }
 ```
 
-`catalog_status: "pending"` means registration/removal persisted but catalog convergence is not yet confirmed. `changed` describes provider/model creation or removal, not a retry of catalog convergence. Repeating a completed installation makes no API mutation. Exceptions are `IntegrationError`, `OwnershipConflict` and `NativeSettingsChanged`; their messages omit captured command output, response bodies and secrets. Runner/request injection is available for offline tests.
+`catalog_status: "pending"` means registration/removal persisted but catalog convergence is not yet confirmed. `changed` describes provider/model creation or removal, not a retry of catalog convergence. Repeating a completed installation makes no API mutation. Version 0.4.4 migrates only its unchanged, journalled legacy Chat adapter to Responses through the management API. The migration is journalled before mutation and can reconcile a lost response; changed ports or edited provider fields are refused. Exceptions are `IntegrationError`, `OwnershipConflict` and `NativeSettingsChanged`; their messages omit captured command output, response bodies and secrets. Runner/request injection is available for offline tests.
 
 The standalone CLI accepts `install` or `detach`, `--root`, optional `--api-port` and `--opencodex-home`, then `--ocx-command` followed by the executable argument list. Exit code 0 means completed, 2 means catalog pending, and 1 means a handled error. Use Python UTF-8 mode on Windows (`$env:PYTHONUTF8='1'`); JSON state is UTF-8 without BOM. Arguments are passed as a list with `shell=False`.
 
@@ -72,7 +72,7 @@ The standalone CLI accepts `install` or `detach`, `--root`, optional `--api-port
 | Setting | Value |
 | --- | --- |
 | Provider ID | `chatgpt-web2api` |
-| Adapter | `openai-chat` |
+| Adapter | `openai-responses` |
 | Base URL | `http://127.0.0.1:<api_port>/codex/v1` |
 | API key | literal placeholder `not-needed` |
 | Upstream model | `auto` |
@@ -83,7 +83,7 @@ The standalone CLI accepts `install` or `detach`, `--root`, optional `--api-port
 
 The conservative context cap belongs only to this model (`modelContextWindows.auto` and custom-model `contextWindow`). It avoids inheriting a large native model window; the bridge independently enforces its serialized prompt character budget. The web UI chooses reasoning automatically, so no Codex effort ladder/default is advertised. Provider `noReasoningModels: ["auto"]` suppresses an outgoing effort override. No native tool-mode or hosted-tool override is sent.
 
-The adapter targets `/codex/v1/chat/completions`. Static `models: ["auto"]`, `selectedModels: ["auto"]`, and `liveModels: false` keep registration deterministic. Web2API's `/codex/v1/models` may still serve `auto` to other consumers. Only this loopback provider gets `allowPrivateNetwork: true`.
+Since 0.4.4 the adapter targets `/codex/v1/responses`. Native function/custom calls, namespaces, IDs, schemas and image inputs are translated through the validated browser protocol. The legacy Chat Completions route remains available. Visible bridge observations use Responses reasoning-summary events; raw model reasoning is not exposed. Codex may declare provider-hosted `web_search` even for a local task: that declaration is explicitly marked unavailable to this transport without blocking client tools. Other unknown hosted tools or a forced hosted-tool choice fail before submission. Static `models: ["auto"]`, `selectedModels: ["auto"]`, and `liveModels: false` keep registration deterministic. Web2API's `/codex/v1/models` may still serve `auto` to other consumers. Only this loopback provider gets `allowPrivateNetwork: true`.
 
 ## Supported commands and catalog safety
 
