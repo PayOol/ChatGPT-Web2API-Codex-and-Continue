@@ -4,6 +4,7 @@
 - Ajoute le transport Responses natif et la migration journalisée du fournisseur possédé par l'installateur ; conserve les outils, résultats, images et permissions du client.
 - Corrige la confusion entre les points d'entrée d'outils et rappelle la découverte du catalogue ainsi que l'initialisation prescrite par le guide Computer Use.
 - Retrouve le texte original d'un message rendu en code en ligne pour reconnaître une réponse terminée et déclencher sa récupération, sans relancer l'action initiale.
+- Récupère une réponse finale sans outil après une faute de nonce, seulement après la correction unique et la vérification complète de l'échange ; conserve le refus de tout appel d'outil mal identifié.
 - Décrit les preuves et limites dans [CODEX-PROGRESS.md](docs/CODEX-PROGRESS.md).
 
 # Distribution 0.4.3

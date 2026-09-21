@@ -816,8 +816,17 @@ class APIServer:
                 if not snapshot.get("completed"):
                     return None
                 if (info or {}).get("repair_attempted"):
+                    if snapshot.get("literal") and not snapshot.get("unsafe_markup"):
+                        try:
+                            message = bridge.parse_verified_final(snapshot.get("assistant", ""))
+                        except ToolProtocolError:
+                            pass
+                        else:
+                            logger.info("Recovered final text from the exact completed repair; no tool call accepted")
+                            return message, snapshot["conversation"]
                     raise ToolProtocolError(
-                        "ChatGPT's answer is still invalid after one format repair; no tool was executed"
+                        "ChatGPT's answer is still invalid after one format repair; "
+                        "no tool from this rejected response was executed"
                     ) from exc
                 raise PendingFormatRepair(exc, nonce, snapshot["conversation"]) from exc
             logger.info(
@@ -893,7 +902,21 @@ class APIServer:
                     parts.append(chunk.delta)
                 return "".join(parts)
 
-            return await send()
+            try:
+                return await send()
+            except ToolProtocolError:
+                if not repair:
+                    raise
+                recovered = await self._recover_agent_reply(
+                    bridge, prompt, request_key, self._driver._current_conv_id
+                )
+                if not recovered or recovered[0].get("tool_calls"):
+                    raise
+                # Reframe text only, after the same full-match recovery checks.
+                # Never rewrite or reissue an action from an invalid response.
+                return bridge.opening + json.dumps({
+                    "content": recovered[0]["content"], "tool_calls": []
+                }, ensure_ascii=False) + "</web2api_response>"
 
         self._agent_state.begin(request_key)
         async with asyncio.timeout(timeout if timeout > 0 else None):

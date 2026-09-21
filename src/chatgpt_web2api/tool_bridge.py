@@ -414,3 +414,25 @@ class ToolBridge:
             "Enclose that entire response in one fenced code block labelled json, preserving every literal character. "
             "Do not repeat completed actions. No tool has executed from the rejected response."
         )
+
+    def parse_verified_final(self, text: str) -> dict:
+        """Accept a final-only frame after the caller proves the entire exchange.
+
+        Only for an exact, completed, paired prompt after the single repair.
+        This never accepts tool calls or overrides a required/named tool choice.
+        A model typo in the frame nonce must not replay already completed work.
+        """
+        if self.choice not in ("auto", "none"):
+            raise ToolProtocolError("A final answer cannot satisfy a required tool choice")
+        found = re.match(r'^<web2api_response nonce="([a-f0-9]{16,64})">', text.strip())
+        if not found:
+            raise ToolProtocolError("No complete final-response envelope")
+        original = self.nonce
+        try:
+            self.nonce = found[1]
+            message = self.parse(text)
+        finally:
+            self.nonce = original
+        if message.get("tool_calls") or not (message.get("content") or "").strip():
+            raise ToolProtocolError("A mismatched frame cannot authorize tools")
+        return message

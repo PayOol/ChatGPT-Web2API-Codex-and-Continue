@@ -12,6 +12,8 @@ Les consignes distinguent les outils de premier niveau des méthodes de `tools` 
 
 Enfin, ChatGPT peut afficher le message utilisateur avec des balises de code en ligne qui enlèvent des caractères à `textContent`. Pour une réponse terminée, la passerelle retrouve le texte source par l'identifiant exact du message dans la même conversation. La comparaison complète du message ou de son empreinte reste obligatoire avant récupération. Une seule correction du format est autorisée ; l'action originale n'est pas renvoyée.
 
+Le contrôle réel a aussi reproduit un 422 après cette unique correction : ChatGPT avait ajouté un caractère au nonce d'une réponse finale JSON pourtant complète. Après vérification de la conversation, du message intégral, de la réponse littérale terminée et de la correction déjà tentée, la passerelle peut récupérer **uniquement le texte final sans appel d'outil**. Un choix d'outil obligatoire, tout appel d'outil, un message différent ou une génération active restent refusés. Cette récupération a été vérifiée sur la réponse réellement bloquée, sans nouvel envoi à ChatGPT ni action locale.
+
 ## Mise à jour
 
 L'installateur migre uniquement son fournisseur ancien, inchangé et identifié par son journal, de `openai-chat` à `openai-responses`. L'opération passe par l'API de gestion OpenCodex et tolère une réponse de mise à jour perdue. Les paramètres modifiés par l'utilisateur, les changements de port et les conflits de propriété restent refusés. Le proxy existant et la configuration native de Codex ne sont pas réécrits.
@@ -23,7 +25,7 @@ L'installateur migre uniquement son fournisseur ancien, inchangé et identifié 
 - Tests de récupération : source utilisateur résolue par identifiant exact, cache limité au même message, refus d'un autre message ou d'une réponse encore active.
 - Tests de migration : coexistence, installation idempotente, reprise après réponse perdue, retrait sélectif et refus des modifications étrangères.
 - Essai réel dans Codex avec `chatgpt-web2api/auto` : les étapes horodatées sont présentes dans les résumés natifs, et des appels `exec` et `node_repl` ont été exécutés avec des résultats réels.
+- L'utilisateur a confirmé que les étapes sont visibles. Le contrôle guidé `node_repl` / `sky.list_apps()` a réellement détecté une fenêtre WhatsApp. Aucun clic, aucune saisie et aucun message n'ont été envoyés.
 - Un essai initial avait encore conclu à tort à l'absence de Computer Use. Le contrôle réel a donc nécessité un guidage vers le catalogue et le guide Windows. La réussite du transport ne certifie pas une décision correcte du modèle pour toute demande.
 
 Les installations neuves Windows Continue et Codex sont vérifiées séparément par le workflow rattaché au commit de publication. La connexion ChatGPT reste celle de l'utilisateur. Les longs délais sont testés par simulation ; ce contrôle ne revendique pas une génération réelle de plusieurs heures.
-

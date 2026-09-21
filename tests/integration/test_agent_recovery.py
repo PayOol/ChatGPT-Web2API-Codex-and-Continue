@@ -191,5 +191,57 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         info = next(iter(self.api._agent_state.pending_frames.values()))
         self.assertTrue(info["repair_attempted"])
 
+    async def nonce_typo_after_repair(self, change=None, choice="auto"):
+        self.driver.answers = [ToolProtocolError("Missing frame"), ToolProtocolError("Wrong nonce")]
+
+        async def snapshot():
+            info = next(iter(self.api._agent_state.pending_frames.values()))
+            return {
+                "user": self.driver.prompts[-1], "conversation": "test-chat",
+                "paired": True, "generating": False, "completed": True,
+                "literal": True, "unsafe_markup": False,
+                "assistant": f'<web2api_response nonce="{info["nonce"]}3">'
+                + '{"content":"Verified final result","tool_calls":[]}</web2api_response>',
+                **(change or {}),
+            }
+
+        self.driver.read_agent_exchange = AsyncMock(side_effect=snapshot)
+        # The real CDP driver sets the conversation after sending.
+        self.driver._current_conv_id = "test-chat"
+        return await self.client.post("/v1/chat/completions", json=body(tool_choice=choice))
+
+    async def test_nonce_typo_in_verified_final_is_recovered_without_another_send(self):
+        r = await self.nonce_typo_after_repair()
+        self.assertEqual(r.status, 200, await r.text())
+        message = (await r.json())["choices"][0]["message"]
+        self.assertEqual(message["content"], "Verified final result")
+        self.assertFalse(message.get("tool_calls"))
+        self.assertEqual(len(self.driver.prompts), 2)
+        self.assertFalse(self.api._agent_state.uncertain)
+        r = await self.client.post("/v1/chat/completions", json=body(tool_choice="auto"))
+        self.assertEqual(r.status, 200)
+        self.assertEqual(len(self.driver.prompts), 2)
+
+    async def test_nonce_typo_cannot_bypass_full_prompt_matching(self):
+        r = await self.nonce_typo_after_repair({"user": "Different task"})
+        self.assertEqual(r.status, 422)
+        self.assertEqual(len(self.driver.prompts), 2)
+
+    async def test_nonce_typo_cannot_bypass_required_tool_choice(self):
+        r = await self.nonce_typo_after_repair(choice="required")
+        self.assertEqual(r.status, 422)
+
+    async def test_nonce_typo_with_tools_stays_blocked(self):
+        r = await self.nonce_typo_after_repair({
+            "assistant": '<web2api_response nonce="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">'
+            + json.dumps({"content": "Read", "tool_calls": [CALL]}) + "</web2api_response>"
+        })
+        self.assertEqual(r.status, 422)
+        self.assertEqual(len(self.driver.prompts), 2)
+
+    async def test_nonce_typo_while_generating_stays_blocked(self):
+        r = await self.nonce_typo_after_repair({"generating": True})
+        self.assertEqual(r.status, 422)
+
 
 del HTTPTests
