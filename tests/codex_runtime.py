@@ -79,4 +79,6 @@ if __name__ == "__main__":
     result = asyncio.run(verify(args.binary or Path(manifest["codex"])))
     text = json.dumps(result, ensure_ascii=False, indent=2)
     (args.root / "logs/codex-runtime.json").write_text(text + "\n", encoding="utf-8")
-    print(text)
+    # Redirected Windows consoles may still use cp1252; keep the artifact UTF-8
+    # and escape non-ASCII characters only in the console transport.
+    print(json.dumps(result, ensure_ascii=True, indent=2))
