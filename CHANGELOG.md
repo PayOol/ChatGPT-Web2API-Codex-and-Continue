@@ -1,3 +1,10 @@
+# Distribution 0.4.3
+
+- Demande une vérification en lecture seule avant de répondre sur l'accès au PC, une application, un MCP, un service connecté ou l'état réel de l'environnement.
+- Rappelle les chemins de découverte effectivement présents dans le catalogue du client. Un outil non listé directement peut être exposé par une passerelle ; une recherche vide ne prouve pas son absence sur le PC.
+- Distingue installation/configuration, exposition au client et fonctionnement vérifié. Respecte les résultats déjà disponibles, les demandes sans inspection et le choix d'outils du client.
+- Conserve les réponses directes pour les explications générales ; ce changement de consigne ne garantit pas une vérification systématique par le modèle. Voir [la preuve et ses limites](docs/ACCESS-VERIFICATION.md).
+
 # Distribution 0.4.2
 
 - Rappelle le contrat d'exécution des outils après les résultats et le catalogue pour limiter les réponses affirmant à tort que les outils du client ne sont pas accessibles.

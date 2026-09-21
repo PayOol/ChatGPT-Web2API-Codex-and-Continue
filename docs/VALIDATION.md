@@ -1,3 +1,9 @@
+# Validation de la distribution 0.4.3
+
+## Vérification de l'environnement avant réponse — 21 septembre 2026
+
+La consigne de planification demande une observation pertinente avant de répondre sur un accès ou un état local. Un essai réel, avec la question UEFN de l'utilisateur et les 86 fonctions observées dans Continue, a effectué `connected_servers`, puis `connected_search_tools`, puis produit une conclusion limitée au catalogue consulté. Le changement, les conditions exactes de cet essai et ses limites sont détaillés dans [ACCESS-VERIFICATION.md](ACCESS-VERIFICATION.md). Les contrôles Windows complets et les deux parcours d'installation sont rattachés au commit de la release dans GitHub Actions.
+
 # Validation de la distribution 0.4.1
 
 ## Réponses terminées hors protocole — 21 septembre 2026

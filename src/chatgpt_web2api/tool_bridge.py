@@ -175,6 +175,7 @@ class ToolBridge:
                 "request the appropriate listed function in tool_calls, then wait for its actual result. "
                 "Respect the user's scope, approvals and any real access or tool errors; never invent success."
             )
+            footer += self._verification_reminder()
             if any(m.get("role") == "tool" for m in messages):
                 footer += (
                     "\nThe tool-role messages above are the results the client has already supplied for "
@@ -226,6 +227,44 @@ class ToolBridge:
             )
         result = header + _json(bounded) + footer
         return result
+
+    def _verification_reminder(self) -> str:
+        """Ground access/state answers in observations, not the model's assumptions.
+
+        Keep auto/none and the original schemas intact. This is a planning
+        instruction, not a fabricated tool result or a blanket forced call.
+        Only advertise discovery functions actually supplied by the client.
+        """
+        reminder = (
+            "\nVerify before answering about this environment: when the user asks whether you can access "
+            "their PC, a local application, MCP server, connected service, file, or current state, use a "
+            "relevant read-only discovery or diagnostic tool FIRST, unless matching current tool results "
+            "already establish the answer or the user forbids inspection. This includes questions phrased "
+            "as 'Do you have access?' and 'As-tu accès ?'. Do not answer yes or no from assumptions about "
+            "the ChatGPT website. A service absent from the immediate tool list may be discoverable through "
+            "a listed gateway or local diagnostic; absence from that list alone does not prove it is "
+            "missing from the PC. Do not ask the user to copy information that a permitted read-only tool "
+            "can obtain. Choose the smallest relevant check and inspect its actual result before concluding. "
+            "Distinguish installed/configured, exposed by this client's catalog, authenticated/reachable, "
+            "and successfully exercised: finding a schema or executable does not prove an operation works. "
+            "Report the scope of the check and any actual error; an inconclusive check is not proof of "
+            "absence. If no relevant callable tool exists, explain that specific unverified limitation. "
+            "Never install, launch, reconfigure, grant access, send messages, modify data, or perform a "
+            "consequential action merely to test access. Respect user instructions and existing permissions. "
+            "General explanations, translations, and answers already supported by current results need "
+            "no artificial tool call."
+        )
+        available = {t["function"]["name"] for t in self.tools}
+        routes = {
+            "connected_servers": "inspect providers exposed by the connected gateway and their reported status",
+            "connected_search_tools": "search that gateway for the requested integration; use its actual schema",
+            "connected_describe_tool": "inspect the exact schema of a tool found by discovery before using it",
+            "local_workspace_info": "inspect the real local workspace and reported runtime capabilities",
+        }
+        hints = [f"{name}: {purpose}" for name, purpose in routes.items() if name in available]
+        if hints:
+            reminder += "\nAvailable read-only discovery routes for this request: " + "; ".join(hints) + "."
+        return reminder
 
     @staticmethod
     def _active_request_reminder(messages: list[dict], prior_messages: list[dict]) -> str:
