@@ -72,6 +72,7 @@ def test_repair_preserves_ports_user_models_and_external_profile(tmp_path, monke
     assert first["cdp_port"] == second["cdp_port"]
     config = yaml.safe_load(path.read_text())
     assert len(config["models"]) == 2
+    assert config["models"][0]["requestOptions"]["timeout"] == 660
     assert len(config["mcpServers"]) == 5
     assert (external / "config.yaml").read_text() == "personal marker"
     assert (root / "BIENVENUE.md").is_file()

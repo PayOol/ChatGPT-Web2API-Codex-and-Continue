@@ -156,7 +156,7 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
         "useLegacyCompletionsEndpoint": False,
         "capabilities": ["tool_use", "image_input"],
         "roles": ["chat", "edit", "apply"],
-        "requestOptions": {"timeout": 660000},
+        "requestOptions": {"timeout": 660},
     }
     config["models"] = [model] + [
         m for m in config.get("models", []) if m.get("name") != model["name"]
