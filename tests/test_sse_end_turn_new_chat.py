@@ -62,7 +62,7 @@ def _phase1_then_phase2_js(
     """
 
     async def _fake_js(expr, timeout=15):
-        if "body.innerText" in expr:  # rate-limit scan
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:  # rate-limit scan
             return json.dumps({"text": "normal"})
         if "has_action" in expr:  # Phase-2 completion poll
             state["phase2"] += 1

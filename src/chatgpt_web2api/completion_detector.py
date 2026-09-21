@@ -67,6 +67,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .agent_dom import AGENT_TEXT_JS
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -201,6 +203,7 @@ class DetectorBudgets:
             hard_timeout_seconds=config.detector_hard_timeout_seconds,
         )
 
+
 # Phrases ChatGPT uses in its rate-limit pop-up. Matched case-insensitively
 # against scanned DOM text. Kept narrow to avoid false positives on normal
 # chat content (e.g. a user asking about "rate limits" in a message).
@@ -209,6 +212,9 @@ _RATE_LIMIT_PHRASES = (
     "you're making requests too quickly",
     "temporarily limited access to your conversations",
     "you've reached the rate limit",
+    "trop de requêtes",
+    "vous envoyez des demandes trop rapidement",
+    "temporairement restreint l’accès à vos conversations",
 )
 
 
@@ -243,7 +249,11 @@ class CompletionDetector:
         self.had_non_text_content: bool = False
 
     async def _reconcile_before_stall(
-        self, d, conv_id: str, turn_anchor, had_non_text_content: bool,
+        self,
+        d,
+        conv_id: str,
+        turn_anchor,
+        had_non_text_content: bool,
     ) -> bool:
         """P1: final reconciliation before raising a phase-2 stall.
 
@@ -270,7 +280,8 @@ class CompletionDetector:
             return False
         try:
             end_result = await d._fetch_end_turn_for_turn(
-                conv_id, turn_anchor,
+                conv_id,
+                turn_anchor,
                 had_non_text_content=had_non_text_content,
             )
             status = collapse_to_end_turn_status(end_result)
@@ -289,6 +300,8 @@ class CompletionDetector:
         turn_anchor,
         budgets: DetectorBudgets | None = None,
         model: str | None = None,
+        response_validator=None,
+        response_marker: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Run Phase-1 (appear) + Phase-2 (stream) and yield delta chunks.
 
@@ -341,6 +354,7 @@ class CompletionDetector:
 
         # Reset per-call results surfaced to the driver tail.
         self.last_dom_text = ""
+        self.validated_dom_text = ""
         self.had_non_text_content = False
 
         # Wait for a new assistant message. The full `timeout` governs (was
@@ -355,6 +369,7 @@ class CompletionDetector:
         deadline = time.monotonic() + timeout
         last_node_count = initial_count
         last_progress = time.monotonic()
+        last_candidate = ""
         while time.monotonic() < deadline:
             # First check for ChatGPT's rate-limit pop-up — if present, fail
             # fast with a clear error instead of waiting out the whole timeout.
@@ -364,11 +379,13 @@ class CompletionDetector:
             try:
                 dom_scan = await d._js_strict(
                     "(function(){"
-                    "  var t = (document.body && document.body.innerText) || '';"
+                    "  var t = Array.from(document.querySelectorAll('[role=dialog],[role=alert]'))"
+                    "    .map(e => e.textContent || '').join('\\n');"
                     "  return JSON.stringify({text: t.slice(0, 4000)});"
                     "})()"
                 )
-                scanned_text = json.loads(dom_scan).get("text", "")
+                scan = json.loads(dom_scan)
+                scanned_text = scan.get("text", "") if isinstance(scan, dict) else ""
             except (CDPJSError, json.JSONDecodeError, TypeError):
                 scanned_text = ""
             if is_rate_limited_text(scanned_text):
@@ -387,7 +404,31 @@ class CompletionDetector:
                 # the slow-render case). Reset the stall clock.
                 last_node_count = current_count
                 last_progress = time.monotonic()
-            if current_count > initial_count:
+            if response_marker:
+                # ChatGPT virtualizes old turns: the assistant count can stay
+                # at three indefinitely. Correlate the newest text by nonce.
+                try:
+                    candidate = (
+                        await d._js_strict(
+                            "(function(){"
+                            + AGENT_TEXT_JS
+                            + "var msgs=document.querySelectorAll('[data-message-author-role=assistant]');"
+                            "var last=msgs[msgs.length-1];if(!last)return '';"
+                            "return web2apiAgentText(last).text;})()"
+                        )
+                        or ""
+                    )
+                except CDPJSError:
+                    candidate = last_candidate
+                if candidate != last_candidate:
+                    last_candidate = candidate
+                    last_progress = time.monotonic()
+                clean = candidate.strip()
+                if clean.startswith("```json\n"):
+                    clean = clean[8:]
+                if clean.startswith(response_marker):
+                    break
+            elif current_count > initial_count:
                 break
             if time.monotonic() - last_progress > PHASE_STALL_SECONDS:
                 raise GenerationStuckError("phase_1_appear", time.monotonic() - last_progress)
@@ -470,11 +511,13 @@ class CompletionDetector:
         # URL (cheap) until a conv_id is available, then the existing backend
         # check can fire. See _get_live_conversation_id_best_effort.
         last_conv_id_probe = 0.0
+        structured_stop_requested = False
         while time.monotonic() < deadline:
             try:
                 result = await d._js_strict(
                     "(function() {"
-                    "  var msgs = document.querySelectorAll('[data-message-author-role=\"assistant\"]');"
+                    + AGENT_TEXT_JS
+                    + "  var msgs = document.querySelectorAll('[data-message-author-role=\"assistant\"]');"
                     "  if (!msgs.length) return JSON.stringify({text:'', md_text:'', html_len:0, child_count:0, has_action:false, is_thinking:false});"
                     "  var last = msgs[msgs.length - 1];"
                     # Text: the clean answer lives in ``.markdown`` textContent.
@@ -486,6 +529,7 @@ class CompletionDetector:
                     # the innerText fallback is trimmed of the leading label.
                     "  var md = last.querySelector('.markdown');"
                     "  var mdText = md ? (md.textContent || '') : '';"
+                    "  var protocol = web2apiAgentText(last);"
                     "  var rawText = (last.innerText || '').trim();"
                     # Strip a leading "Thinking..." / "Thought for …" reasoning
                     # label so the innerText fallback can't leak it as a delta.
@@ -555,7 +599,8 @@ class CompletionDetector:
                     "  var hasThinkingEl = !!last.querySelector('.result-thinking');"
                     "  var visibleThinking = /^(thinking|reasoning)\\b/i.test(rawText.trim());"
                     "  var is_thinking = !has_action && (hasThinkingEl || (visibleThinking && !mdText));"
-                    "  return JSON.stringify({text: text, md_text: mdText, html_len: html_len, child_count: child_count, has_action: has_action, is_thinking: is_thinking});"
+                    "  var is_generating = !!document.querySelector('[data-testid=\"stop-button\"]');"
+                    "  return JSON.stringify({text: text, md_text: mdText, agent_text: protocol.text, literal: protocol.literal, unsafe_markup: protocol.unsafe_markup, html_len: html_len, child_count: child_count, has_action: has_action, is_thinking: is_thinking, is_generating: is_generating});"
                     "})()",
                 )
                 data = json.loads(result)
@@ -565,6 +610,8 @@ class CompletionDetector:
 
             current = data.get("text", "")
             md_text = data.get("md_text", "")
+            if response_validator is not None:
+                md_text = data.get("agent_text", md_text)
             html_len = data.get("html_len", 0)
             child_count = data.get("child_count", 0)
             has_action = data.get("has_action", False)
@@ -576,6 +623,15 @@ class CompletionDetector:
             # the innerText fallback (with its leading label already stripped
             # in JS) is what carries the streamed answer.
             current = md_text or current
+            # Localized reasoning placeholders are status UI, not answer text.
+            # They cannot be retracted once emitted into the SSE stream.
+            if not md_text and current.strip().lower().rstrip(".\u2026") in (
+                "réflexion",
+                "raisonnement",
+                "thinking",
+                "reasoning",
+            ):
+                current = ""
 
             # is_thinking means the model is actively reasoning — the DOM is
             # legitimately static for tens of seconds, which is NOT a stall.
@@ -638,6 +694,51 @@ class CompletionDetector:
             last_child_count = child_count
 
             # ── Completion detection ─────────────────────────────────────
+            if response_validator is not None and md_text and not is_thinking:
+                is_generating = data.get("is_generating", False)
+                try:
+                    if data.get("unsafe_markup") or not data.get("literal", True):
+                        from .tool_bridge import ToolProtocolError
+
+                        raise ToolProtocolError(
+                            "Inline Markdown can alter literal tool arguments. Return the protocol inside one fenced json code block."
+                        )
+                    framed = response_validator(last_dom_text)
+                except ValueError:
+                    # A partial frame is normal during generation. A completed
+                    # invalid response goes to the API's bounded repair step.
+                    if (
+                        not is_generating
+                        and has_action
+                        and time.monotonic() - last_change_time >= 1.0
+                    ):
+                        raise
+                else:
+                    if time.monotonic() - last_change_time >= 1.0:
+                        if is_generating:
+                            # The complete, validated protocol frame explicitly
+                            # ends this assistant turn. Stop transport generation
+                            # before delivering its tools to the external client.
+                            if not structured_stop_requested:
+                                from .composer_transport import click_control, wait_idle
+
+                                await click_control(d, "stop")
+                                await wait_idle(d, 3)
+                                structured_stop_requested = True
+                                logger.info(
+                                    "Complete Agent frame received; stopping remaining Web generation"
+                                )
+                            # The frame terminator is authoritative for this
+                            # protocol. A stuck Stop-button UI must not withhold
+                            # an already complete, nonce-validated tool response.
+                            # A following send settles this exact completed turn first.
+                            d._agent_completed_frame = framed
+                            self.validated_dom_text = framed
+                            break
+                        elif has_action:
+                            self.validated_dom_text = framed
+                            logger.info("Structured Agent response validated from completed DOM")
+                            break
             # Two signals, ordered by stability. Backend end_turn is PRIMARY
             # (issue #12): it survived three DOM action-button drifts where the
             # DOM selector failed. The DOM has_action is a FALLBACK for the
@@ -668,7 +769,8 @@ class CompletionDetector:
             # backend_fetch_failed so the DOM fallback below is unlocked this poll.
             backend_fetch_failed = False
             if (
-                conv_id_for_check
+                response_validator is None
+                and conv_id_for_check
                 and (last_dom_text or saw_thinking or is_thinking or had_non_text_content)
                 and time.monotonic() - last_backend_check > 3.0
             ):
@@ -682,7 +784,8 @@ class CompletionDetector:
                     # fallback and risk completing off a prior turn's action
                     # row — the line-493 gate invariant).
                     end_result = await d._fetch_end_turn_for_turn(
-                        conv_id_for_check, turn_anchor,
+                        conv_id_for_check,
+                        turn_anchor,
                         had_non_text_content=had_non_text_content,
                     )
                     status = collapse_to_end_turn_status(end_result)
@@ -705,7 +808,8 @@ class CompletionDetector:
                         backend_fetch_failed = True
                         logger.debug(
                             "end_turn fetch failed (status=%s): %s",
-                            end_result.status, end_result.diagnostic,
+                            end_result.status,
+                            end_result.diagnostic,
                         )
                     # else: not_ready — no-op (do NOT set backend_fetch_failed).
                 except AuthExpiredError:
@@ -730,6 +834,8 @@ class CompletionDetector:
             # empty answer off a stale button.
             if (
                 has_action
+                and bool(conv_id_for_check)
+                and bool(md_text)
                 and (not conv_id_for_check or backend_fetch_failed)
                 and (last_dom_text or had_non_text_content)
             ):
@@ -766,9 +872,7 @@ class CompletionDetector:
                     else budgets.first_content_timeout_seconds
                 )
                 stall_kind = (
-                    "stream_idle_timeout"
-                    if first_content_seen
-                    else "first_content_timeout"
+                    "stream_idle_timeout" if first_content_seen else "first_content_timeout"
                 )
 
                 # Hard cap: absolute wall-clock limit regardless of DOM signals.
@@ -782,7 +886,9 @@ class CompletionDetector:
                     # backend one more time.
                     turn_id = getattr(turn_anchor, "captured_id", None)
                     reconciled = await self._reconcile_before_stall(
-                        d, conv_id_for_check, turn_anchor,
+                        d,
+                        conv_id_for_check,
+                        turn_anchor,
                         had_non_text_content,
                     )
                     if reconciled:
@@ -790,8 +896,11 @@ class CompletionDetector:
                             "Phase-2 %s reconciled after stall — generation "
                             "had completed (elapsed=%.0fs, kind=%s, "
                             "model_class=%s, active=%s)",
-                            stall_kind, elapsed_total, stall_kind,
-                            model_class, generation_active_signal,
+                            stall_kind,
+                            elapsed_total,
+                            stall_kind,
+                            model_class,
+                            generation_active_signal,
                         )
                         return  # generation completed — return normally
                     # Reconciliation found no completion — raise structured error.
@@ -807,7 +916,9 @@ class CompletionDetector:
             else:
                 # Legacy path (no budgets provided): single PHASE_STALL_SECONDS.
                 if time.monotonic() - last_change_time > PHASE_STALL_SECONDS:
-                    raise GenerationStuckError("phase_2_stream", time.monotonic() - last_change_time)
+                    raise GenerationStuckError(
+                        "phase_2_stream", time.monotonic() - last_change_time
+                    )
 
             await asyncio.sleep(0.5)
 

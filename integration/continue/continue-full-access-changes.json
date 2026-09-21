@@ -1,0 +1,17 @@
+[
+  {
+    "file": "out\\extension.js",
+    "before": "            if (tool2.evaluateToolCallPolicy) {\n              const evaluatedPolicy = tool2.evaluateToolCallPolicy(",
+    "after": "            // Explicit user-owned opt-in; no policy changes when disabled.\n            if (require(\"./continue-full-access.local.cjs\").isEnabled()) {\n              return { policy: \"allowedWithoutPermission\", displayValue, fullAccess: true };\n            }\n            if (tool2.evaluateToolCallPolicy) {\n              const evaluatedPolicy = tool2.evaluateToolCallPolicy("
+  },
+  {
+    "file": "out\\extension.js",
+    "before": "function serializeTool(tool2) {\n  const { preprocessArgs, evaluateToolCallPolicy, ...rest } = tool2;\n  return rest;\n}",
+    "after": "function serializeTool(tool2) {\n  const { preprocessArgs, evaluateToolCallPolicy, ...rest } = tool2;\n  if (require(\"./continue-full-access.local.cjs\").isEnabled()) {\n    return { ...rest, defaultToolPolicy: \"allowedWithoutPermission\" };\n  }\n  return rest;\n}"
+  },
+  {
+    "file": "gui\\assets\\index.js",
+    "before": "const s=o.content.policy,l=o.content.displayValue;return i===\"disabled\"?",
+    "after": "const s=o.content.policy,l=o.content.displayValue;return o.content.fullAccess===true?{policy:\"allowedWithoutPermission\",displayValue:l,toolCallState:n}:i===\"disabled\"?"
+  }
+]

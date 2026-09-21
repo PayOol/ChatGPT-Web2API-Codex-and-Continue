@@ -181,6 +181,11 @@ async def test_rest_post_lock_check_catches_race(monkeypatch):
     import chatgpt_web2api.api_server as srv
 
     server = srv.APIServer.__new__(srv.APIServer)
+    from chatgpt_web2api.agent_sessions import AgentState
+
+    server._agent_state = AgentState(interval=0)
+    server._last_successful_send_at = None
+    # Remaining fields below mirror __init__ for this isolated handler test.
     server._last_conv_id = None
     server._last_project_id = None
     server._request_count = 0
@@ -263,6 +268,11 @@ async def test_rest_auth_recovery_probes_then_proceeds(monkeypatch):
     import chatgpt_web2api.api_server as srv
 
     server = srv.APIServer.__new__(srv.APIServer)
+    from chatgpt_web2api.agent_sessions import AgentState
+
+    server._agent_state = AgentState(interval=0)
+    server._last_successful_send_at = None
+    # Remaining fields below mirror __init__ for this isolated handler test.
     server._last_conv_id = None
     server._last_project_id = None
     server._request_count = 0
@@ -345,6 +355,11 @@ async def test_rest_auth_recovery_fails_still_fail_fasts():
     import chatgpt_web2api.api_server as srv
 
     server = srv.APIServer.__new__(srv.APIServer)
+    from chatgpt_web2api.agent_sessions import AgentState
+
+    server._agent_state = AgentState(interval=0)
+    server._last_successful_send_at = None
+    # Remaining fields below mirror __init__ for this isolated handler test.
     server._last_conv_id = None
     server._last_project_id = None
     server._request_count = 0

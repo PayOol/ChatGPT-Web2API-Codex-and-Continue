@@ -118,7 +118,9 @@ def test_per_call_results_reset_on_each_call():
     async def fake_js(expr):
         if "getBoundingClientRect" in expr:  # Phase-2 completion poll
             return poll
-        if "innerText" in expr:  # Phase-1 rate-limit body scan
+        if (
+            "innerText" in expr or "[role=dialog],[role=alert]" in expr
+        ):  # Phase-1 rate-limit body scan
             return scan
         return "1"  # assistant-node count poll
 
@@ -133,7 +135,8 @@ def test_per_call_results_reset_on_each_call():
 
     async def drain():
         async for _ in detector.stream_until_complete(
-            initial_count=0, timeout=5,
+            initial_count=0,
+            timeout=5,
             turn_anchor=TurnAnchor(sent_text="test", mode="fresh_chat"),
         ):
             pass
@@ -187,7 +190,7 @@ async def test_detector_routes_js_through_driver():
         js_calls["n"] += 1  # proof the detector reached transport via the driver
         if "getBoundingClientRect" in expr:  # Phase-2 poll (also contains innerText)
             return poll
-        if "innerText" in expr:  # Phase-1 body scan
+        if "innerText" in expr or "[role=dialog],[role=alert]" in expr:  # Phase-1 body scan
             return scan
         return "1"
 
@@ -198,7 +201,8 @@ async def test_detector_routes_js_through_driver():
     driver._get_live_conversation_id_best_effort = AsyncMock(return_value="conv-1")
     seen = []
     async for chunk in detector.stream_until_complete(
-        initial_count=0, timeout=10000,
+        initial_count=0,
+        timeout=10000,
         turn_anchor=TurnAnchor(sent_text="test", mode="fresh_chat"),
     ):
         seen.append(chunk)

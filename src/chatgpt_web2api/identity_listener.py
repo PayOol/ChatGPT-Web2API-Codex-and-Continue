@@ -27,6 +27,7 @@ synchronously and schedules the heavy POST-body parse via
 ``loop.create_task`` so the reader loop is never blocked on JSON parsing or
 hashing of large request bodies.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -47,9 +48,7 @@ _MAX_POST_DATA_SIZE = 4 * 1024 * 1024
 _SEND_ENDPOINT_SUFFIX = "/backend-api/f/conversation"
 
 # UUID v4 shape (8-4-4-4-12 hex). Used to validate messages[0].id.
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
-)
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 
 @dataclass
@@ -233,7 +232,8 @@ class IdentityListener:
         if self._active_scope is not None and not self._active_scope._closed:
             logger.warning(
                 "identity_listener: arming new scope while previous is active "
-                "(seq=%d); closing stale", self._active_scope.send_sequence_id
+                "(seq=%d); closing stale",
+                self._active_scope.send_sequence_id,
             )
             self._active_scope.close()
         self._active_scope = scope
@@ -256,7 +256,8 @@ class IdentityListener:
             self._record_fallback_reason("capture_timeout")
             logger.info(
                 "identity_capture_missed: timeout after %.1fs (seq=%d)",
-                timeout, scope.send_sequence_id,
+                timeout,
+                scope.send_sequence_id,
             )
             return None
 
@@ -347,28 +348,32 @@ class IdentityListener:
             parts = (m0.get("content") or {}).get("parts") or []
             body_text = "\n".join(str(p) for p in parts if isinstance(p, str))
             if body_text:
-                body_hash = hashlib.sha256(body_text.encode("utf-8")).hexdigest()
+                body_hash = hash_sent_text(body_text)
                 if body_hash != scope.expected_text_hash:
                     # Text doesn't match — could be a different send (retry,
                     # regenerate). Don't resolve; leave scope open.
                     logger.debug(
                         "identity_capture: text hash mismatch (expected %s, got %s) — "
                         "not our send, leaving scope open",
-                        scope.expected_text_hash[:12], body_hash[:12],
+                        scope.expected_text_hash[:12],
+                        body_hash[:12],
                     )
                     return
 
             # Success — resolve the scope.
             self.capture_success_count += 1
-            scope._resolve(CaptureResult(
-                uuid=uuid,
-                reason="matched",
-                candidate_count=1,
-                request_id=request_id,
-            ))
+            scope._resolve(
+                CaptureResult(
+                    uuid=uuid,
+                    reason="matched",
+                    candidate_count=1,
+                    request_id=request_id,
+                )
+            )
             logger.info(
                 "identity_capture_success: uuid=%s seq=%d",
-                uuid, scope.send_sequence_id,
+                uuid,
+                scope.send_sequence_id,
             )
         except Exception:
             logger.exception("identity_listener: error processing send POST")
@@ -392,8 +397,8 @@ class IdentityListener:
 def hash_sent_text(text: str) -> str:
     """Stable SHA-256 hash of the sent prompt, for capture validation.
 
-    The hash is computed over the *raw* sent text (before any normalization)
-    because the POST body carries the raw text. Used by the capture scope to
-    validate a POST belongs to this send (failure-mode D).
+    ProseMirror can replace indentation spaces with NBSP before sending.
+    Normalize that editor transformation on both sides, preserving all other
+    text so unrelated sends cannot satisfy the capture scope.
     """
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(text.replace("\u00a0", " ").encode("utf-8")).hexdigest()

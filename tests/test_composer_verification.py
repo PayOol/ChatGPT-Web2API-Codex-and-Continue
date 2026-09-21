@@ -12,13 +12,12 @@ reimplementation of the JS DOM walker to verify the extraction logic against
 realistic ProseMirror DOM shapes — not just mocked output strings.
 """
 
-import unicodedata
 from unittest.mock import AsyncMock
 
 import pytest
 
-from chatgpt_web2api.chatgpt_dom import ChatGPTDom
 from chatgpt_web2api.cdp_driver import CDPDriver
+from chatgpt_web2api.chatgpt_dom import ChatGPTDom
 
 
 def _make_dom(js_return_value=""):
@@ -36,8 +35,10 @@ def _make_dom(js_return_value=""):
 # extraction LOGIC, not just the comparator. If the JS changes, this must
 # change too. (ChatGPT review finding: tests must execute the extractor.)
 
+
 class _Node:
     """Minimal DOM node for testing the extractor logic."""
+
     def __init__(self, tag=None, text=None, children=None):
         self.tag = tag  # None = text node
         self.text = text
@@ -108,11 +109,14 @@ class TestExtractorLogic:
     def test_br_inside_p_preserves_newline(self):
         """<p>line1<br>line2</p> should extract as 'line1\\nline2'.
         This is the core bug — textContent would give 'line1line2'."""
-        p = _Node("P", children=[
-            _Node(text="line1"),
-            _Node("BR"),
-            _Node(text="line2"),
-        ])
+        p = _Node(
+            "P",
+            children=[
+                _Node(text="line1"),
+                _Node("BR"),
+                _Node(text="line2"),
+            ],
+        )
         result = _extract_composer([p])
         assert result == "line1\nline2", f"Expected 'line1\\nline2', got {result!r}"
 
@@ -152,11 +156,14 @@ class TestExtractorLogic:
     def test_inline_nesting_with_br(self):
         """<p><span>line1</span><br><strong>line2</strong></p> → 'line1\\nline2'.
         Nested inline wrappers should be handled correctly."""
-        p = _Node("P", children=[
-            _Node("SPAN", children=[_Node(text="line1")]),
-            _Node("BR"),
-            _Node("STRONG", children=[_Node(text="line2")]),
-        ])
+        p = _Node(
+            "P",
+            children=[
+                _Node("SPAN", children=[_Node(text="line1")]),
+                _Node("BR"),
+                _Node("STRONG", children=[_Node(text="line2")]),
+            ],
+        )
         result = _extract_composer([p])
         assert result == "line1\nline2", f"Expected 'line1\\nline2', got {result!r}"
 
@@ -180,9 +187,7 @@ class TestComparatorDefects:
         actual = "cafe\u0301"
         assert expected != actual, "Precondition: without NFC these differ"
         dom, driver = _make_dom(actual)
-        result = await dom._verify_composer_text(
-            'div[role="textbox"]#prompt-textarea', expected
-        )
+        result = await dom._verify_composer_text('div[role="textbox"]#prompt-textarea', expected)
         assert result is True, "NFC should make precomposed and decomposed equal"
 
     @pytest.mark.asyncio
@@ -190,17 +195,13 @@ class TestComparatorDefects:
         """A composer that adds one trailing newline (ProseMirror habit)
         should still match the expected text."""
         dom, driver = _make_dom("hello\n")
-        result = await dom._verify_composer_text(
-            'div[role="textbox"]#prompt-textarea', "hello\n"
-        )
+        result = await dom._verify_composer_text('div[role="textbox"]#prompt-textarea', "hello\n")
         assert result is True
 
     @pytest.mark.asyncio
     async def test_em_dash_and_curly_quotes_pass(self):
         """Em-dashes and curly quotes should round-trip correctly."""
-        text = 'Here\u2019s a test \u2014 with \u201ccurly quotes\u201d and an em-dash.'
+        text = "Here\u2019s a test \u2014 with \u201ccurly quotes\u201d and an em-dash."
         dom, driver = _make_dom(text)
-        result = await dom._verify_composer_text(
-            'div[role="textbox"]#prompt-textarea', text
-        )
+        result = await dom._verify_composer_text('div[role="textbox"]#prompt-textarea', text)
         assert result is True

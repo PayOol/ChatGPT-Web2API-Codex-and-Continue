@@ -32,6 +32,7 @@ Internal status vocabulary collapses to tri-state for the detector:
   fetch_failed ← transport_failed
   auth_failed propagates as AuthExpiredError (never degrades).
 """
+
 from __future__ import annotations
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -47,9 +48,7 @@ from dataclasses import dataclass, field, replace
 from typing import Literal
 
 try:
-    SKEW_TOLERANCE_SECONDS = float(
-        _os.getenv("W2A_TURN_DEGRADED_SKEW_TOLERANCE_SECONDS", "8.0")
-    )
+    SKEW_TOLERANCE_SECONDS = float(_os.getenv("W2A_TURN_DEGRADED_SKEW_TOLERANCE_SECONDS", "8.0"))
 except (ValueError, TypeError):
     SKEW_TOLERANCE_SECONDS = 8.0
 
@@ -62,10 +61,10 @@ _PREFIX_MATCH_MIN = 1024
 # ── Anchor mode ───────────────────────────────────────────────────────────
 
 AnchorMode = Literal[
-    "captured_id",          # primary: IdentityListener captured the UUID
+    "captured_id",  # primary: IdentityListener captured the UUID
     "existing_conversation",  # fallback: backend node-id/time anchor
-    "degraded_existing",    # fallback: sent_text + wall-clock freshness
-    "fresh_chat",           # fallback: sent_text-only until conv_id resolves
+    "degraded_existing",  # fallback: sent_text + wall-clock freshness
+    "fresh_chat",  # fallback: sent_text-only until conv_id resolves
 ]
 
 
@@ -111,13 +110,13 @@ class TurnAnchor:
 
 # Full internal status vocabulary (kept rich for canary diagnostics).
 TextStatus = Literal[
-    "matched",              # terminal assistant text found, end_turn=true
-    "not_ready",            # correlated node exists but not done, or no candidate yet
-    "ambiguous",            # ≥2 matching user nodes; keep polling
-    "degraded_not_fresh",   # single match but fails freshness floor; keep polling
-    "non_text",             # correlated assistant is non-text (image/tool/etc.)
-    "fetch_failed",         # transport error — detector may unlock DOM fallback
-    "auth_failed",          # 401 — hard fail, never degrades
+    "matched",  # terminal assistant text found, end_turn=true
+    "not_ready",  # correlated node exists but not done, or no candidate yet
+    "ambiguous",  # ≥2 matching user nodes; keep polling
+    "degraded_not_fresh",  # single match but fails freshness floor; keep polling
+    "non_text",  # correlated assistant is non-text (image/tool/etc.)
+    "fetch_failed",  # transport error — detector may unlock DOM fallback
+    "auth_failed",  # 401 — hard fail, never degrades
 ]
 
 
@@ -145,6 +144,7 @@ class TurnEndResult:
 
 # ── Errors ────────────────────────────────────────────────────────────────
 
+
 class TurnAnchorUnavailableError(RuntimeError):
     """Pre-send anchor capture failed on an existing conversation.
 
@@ -165,8 +165,9 @@ class TurnReconciliationError(RuntimeError):
     — never the raw prompt or full assistant text.
     """
 
-    def __init__(self, conversation_id: str, anchor_mode: str, last_status: str,
-                 diagnostic: dict) -> None:
+    def __init__(
+        self, conversation_id: str, anchor_mode: str, last_status: str, diagnostic: dict
+    ) -> None:
         self.conversation_id = conversation_id
         self.anchor_mode = anchor_mode
         self.last_status = last_status
@@ -186,6 +187,7 @@ class TurnReconciliationError(RuntimeError):
 
 # ── Text normalization + matching ─────────────────────────────────────────
 
+
 def normalize_text(s: str) -> str:
     """Normalize text for matching: NFC, CRLF→LF, strip trailing ws + zero-width.
 
@@ -200,6 +202,9 @@ def normalize_text(s: str) -> str:
     s = unicodedata.normalize("NFC", s)
     # CRLF / CR → LF.
     s = s.replace("\r\n", "\n").replace("\r", "\n")
+    # Match composer verification: ProseMirror serializes some indentation
+    # spaces as NBSP in the submitted user message.
+    s = s.replace("\u00a0", " ")
     # Strip zero-width characters (ZWSP, ZWJ, ZWNJ, BOM).
     s = "".join(ch for ch in s if ch not in ("\u200b", "\u200d", "\u200c", "\ufeff"))
     # Strip trailing whitespace per line + overall.
@@ -234,6 +239,7 @@ def user_text_matches_sent(parent_text: str, sent_text: str) -> bool:
 
 
 # ── Selectors ─────────────────────────────────────────────────────────────
+
 
 def _node_text(node: dict) -> str:
     """Extract joined text from a projected or raw node.
@@ -331,12 +337,13 @@ def _resolve_user_node(mapping: dict, anchor: TurnAnchor) -> tuple[str | None, s
             ct = _node_create_time(node)
             mid = _node_id(node)
             # Newer than pre-send latest user, OR different node id.
-            if (anchor.latest_user_create_time is not None
-                    and ct > anchor.latest_user_create_time):
+            if anchor.latest_user_create_time is not None and ct > anchor.latest_user_create_time:
                 fresh.append((nid, node))
-            elif (anchor.latest_user_node_id is not None
-                  and mid != anchor.latest_user_node_id
-                  and ct >= (anchor.latest_user_create_time or 0.0)):
+            elif (
+                anchor.latest_user_node_id is not None
+                and mid != anchor.latest_user_node_id
+                and ct >= (anchor.latest_user_create_time or 0.0)
+            ):
                 fresh.append((nid, node))
         if not fresh:
             return None, "no_fresh_text_match"
@@ -395,9 +402,7 @@ def _resolve_user_node(mapping: dict, anchor: TurnAnchor) -> tuple[str | None, s
     return None, f"unhandled_mode_{anchor.mode}"
 
 
-def _find_assistant_descendants(
-    mapping: dict, user_nid: str
-) -> list[tuple[str, dict]]:
+def _find_assistant_descendants(mapping: dict, user_nid: str) -> list[tuple[str, dict]]:
     """Find assistant nodes that are descendants of the user node.
 
     Bidirectional (ChatGPT round 3):
@@ -467,47 +472,62 @@ def select_text_for_turn(mapping: dict, anchor: TurnAnchor) -> TurnTextResult:
 
     descendants = _find_assistant_descendants(mapping, user_nid)
     if not descendants:
-        return TurnTextResult("not_ready", diagnostic={
-            "reason": "no_assistant_descendant", "user_node": user_nid,
-        })
+        return TurnTextResult(
+            "not_ready",
+            diagnostic={
+                "reason": "no_assistant_descendant",
+                "user_node": user_nid,
+            },
+        )
 
     # Terminal selection: NEWEST end_turn=true assistant TEXT descendant.
     text_candidates = [
-        (nid, node) for nid, node in descendants
+        (nid, node)
+        for nid, node in descendants
         if _node_content_type(node) == "text" and _node_text(node).strip()
     ]
     if text_candidates:
-        end_turn_text = [
-            (nid, node) for nid, node in text_candidates if _node_end_turn(node)
-        ]
+        end_turn_text = [(nid, node) for nid, node in text_candidates if _node_end_turn(node)]
         if end_turn_text:
             # Newest by create_time.
             best = max(end_turn_text, key=lambda pair: _node_create_time(pair[1]))
             return TurnTextResult(
-                "matched", text=_node_text(best[1]),
-                diagnostic={"user_node": user_nid, "assistant_node": best[0],
-                            "reason": "terminal_text_end_turn"},
+                "matched",
+                text=_node_text(best[1]),
+                diagnostic={
+                    "user_node": user_nid,
+                    "assistant_node": best[0],
+                    "reason": "terminal_text_end_turn",
+                },
             )
         # Text candidates exist but none end_turn yet.
-        return TurnTextResult("not_ready", diagnostic={
-            "reason": "text_not_end_turn", "user_node": user_nid,
-            "candidate_count": len(text_candidates),
-        })
+        return TurnTextResult(
+            "not_ready",
+            diagnostic={
+                "reason": "text_not_end_turn",
+                "user_node": user_nid,
+                "candidate_count": len(text_candidates),
+            },
+        )
 
     # No text candidates — check for non-text assistant (image/tool-use).
-    non_text = [
-        (nid, node) for nid, node in descendants
-        if _node_content_type(node) != "text"
-    ]
+    non_text = [(nid, node) for nid, node in descendants if _node_content_type(node) != "text"]
     if non_text:
-        return TurnTextResult("non_text", diagnostic={
-            "user_node": user_nid,
-            "content_types": [_node_content_type(n) for _, n in non_text],
-        })
+        return TurnTextResult(
+            "non_text",
+            diagnostic={
+                "user_node": user_nid,
+                "content_types": [_node_content_type(n) for _, n in non_text],
+            },
+        )
 
-    return TurnTextResult("not_ready", diagnostic={
-        "reason": "descendants_exist_but_no_text", "user_node": user_nid,
-    })
+    return TurnTextResult(
+        "not_ready",
+        diagnostic={
+            "reason": "descendants_exist_but_no_text",
+            "user_node": user_nid,
+        },
+    )
 
 
 def select_end_turn_for_turn(
@@ -534,42 +554,56 @@ def select_end_turn_for_turn(
 
     descendants = _find_assistant_descendants(mapping, user_nid)
     if not descendants:
-        return TurnEndResult("not_ready", diagnostic={
-            "reason": "no_assistant_descendant", "user_node": user_nid,
-        })
+        return TurnEndResult(
+            "not_ready",
+            diagnostic={
+                "reason": "no_assistant_descendant",
+                "user_node": user_nid,
+            },
+        )
 
     # Text completion: newest end_turn=true text descendant with non-empty text.
     text_end_turn = [
-        (nid, node) for nid, node in descendants
-        if _node_content_type(node) == "text"
-        and _node_text(node).strip()
-        and _node_end_turn(node)
+        (nid, node)
+        for nid, node in descendants
+        if _node_content_type(node) == "text" and _node_text(node).strip() and _node_end_turn(node)
     ]
     if text_end_turn:
-        return TurnEndResult("matched", diagnostic={
-            "user_node": user_nid,
-            "assistant_node": text_end_turn[0][0],
-            "reason": "text_end_turn",
-        })
+        return TurnEndResult(
+            "matched",
+            diagnostic={
+                "user_node": user_nid,
+                "assistant_node": text_end_turn[0][0],
+                "reason": "text_end_turn",
+            },
+        )
 
     # Non-text completion: correlated non-text assistant with end_turn=true,
     # gated by DOM had_non_text_content.
     non_text_end_turn = [
-        (nid, node) for nid, node in descendants
+        (nid, node)
+        for nid, node in descendants
         if _node_content_type(node) != "text" and _node_end_turn(node)
     ]
     if non_text_end_turn and had_non_text_content:
-        return TurnEndResult("matched", diagnostic={
-            "user_node": user_nid,
-            "assistant_node": non_text_end_turn[0][0],
-            "reason": "non_text_end_turn_with_dom_guard",
-        })
+        return TurnEndResult(
+            "matched",
+            diagnostic={
+                "user_node": user_nid,
+                "assistant_node": non_text_end_turn[0][0],
+                "reason": "non_text_end_turn_with_dom_guard",
+            },
+        )
 
     # Correlated node exists but not done.
-    return TurnEndResult("not_ready", diagnostic={
-        "reason": "not_end_turn", "user_node": user_nid,
-        "descendant_count": len(descendants),
-    })
+    return TurnEndResult(
+        "not_ready",
+        diagnostic={
+            "reason": "not_end_turn",
+            "user_node": user_nid,
+            "descendant_count": len(descendants),
+        },
+    )
 
 
 def collapse_to_end_turn_status(result: TurnEndResult) -> EndTurnStatus:

@@ -1,0 +1,17 @@
+[
+  {
+    "file": "out\\extension.js",
+    "before": "          return model.compileChatMessages(messages, options);\n        });\n        TTS.messenger",
+    "after": "          let compiled, compileError;\n          try { compiled = model.compileChatMessages(messages, options); }\n          catch (error) {\n            if (!msg.data.autoCompaction || !String(error.message).includes(\"Not enough context\")) throw error;\n            compileError = error;\n            compiled = { compiledChatMessages: [], didPrune: true, contextPercentage: 1 };\n          }\n          if (msg.data.autoCompaction) {\n            const summary = await require(\"./continue-auto-compaction.local.cjs\").maybeCompact(\n              { ...msg.data.autoCompaction, contextPercentage: compiled.contextPercentage, didPrune: compiled.didPrune },\n              { model, compactConversation }\n            );\n            if (summary && !summary.skipped) return { ...compiled, autoCompaction: summary };\n          }\n          if (compileError) throw compileError;\n          return compiled;\n        });\n        TTS.messenger"
+  },
+  {
+    "file": "gui\\assets\\index.js",
+    "before": "k8e=xa(\"chat/streamNormalInput\",async({legacySlashCommandData:e,depth:t=0},{dispatch:n,extra:r,getState:i})=>",
+    "after": "k8e=xa(\"chat/streamNormalInput\",async({legacySlashCommandData:e,depth:t=0,skipLocalCompaction=false},{dispatch:n,extra:r,getState:i})=>"
+  },
+  {
+    "file": "gui\\assets\\index.js",
+    "before": "const x=await r.ideMessenger.request(\"llm/compileChat\",{messages:p,options:u});if(x.status===\"error\")",
+    "after": "const compactionHistory=i().session.history;const x=await r.ideMessenger.request(\"llm/compileChat\",{messages:p,options:u,...(!skipLocalCompaction?{autoCompaction:{sessionId:a.session.id,history:compactionHistory}}:{})});if(x.status===\"success\"&&x.content.autoCompaction){const ac=x.content.autoCompaction,now=i();if(now.session.id!==a.session.id||!now.session.isStreaming||a.session.streamAborter.signal.aborted||JSON.stringify(now.session.history)!==JSON.stringify(compactionHistory))return;n(Fen({index:ac.index,updates:{conversationSummary:ac.summary}}));n(Jen(false));n(Yen(void 0));await n(ju({openNewSession:false,generateTitle:false}));if(i().session.id!==a.session.id||!i().session.isStreaming||a.session.streamAborter.signal.aborted)return;return Qh(await n(k8e({legacySlashCommandData:e,depth:t,skipLocalCompaction:true})))}if(x.status===\"error\")"
+  }
+]

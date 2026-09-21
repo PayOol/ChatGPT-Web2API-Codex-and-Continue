@@ -186,7 +186,7 @@ async def test_phase2_stall_raises_generation_stuck(monkeypatch):
             return json.dumps(
                 {"text": "partial", "html_len": 10, "child_count": 1, "has_action": False}
             )
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             # Rate-limit scan (Phase 1)
             return json.dumps({"text": "normal page"})
         # Count poll (bare .length expression)
@@ -228,9 +228,11 @@ async def test_slow_appear_succeeds_without_cap(monkeypatch):
     count_polls = {"n": 0}
 
     async def _fake_js(expr, timeout=15):
+        if "location.href" in expr:
+            return "https://chatgpt.com/c/test-current-turn"
         if "has_action" in expr:
             return json.dumps({"text": "done", "has_action": True})
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal"})
         count_polls["n"] += 1
         n = count_polls["n"]
@@ -241,9 +243,8 @@ async def test_slow_appear_succeeds_without_cap(monkeypatch):
     d._js_strict = _fake_js
     d.type_message = AsyncMock()
     d.click_send = AsyncMock()
-    d._fetch_text_for_turn = AsyncMock(
-        return_value=TurnTextResult(status="matched", text="done")
-    )
+    d._fetch_text_for_turn = AsyncMock(return_value=TurnTextResult(status="matched", text="done"))
+    d._fetch_end_turn_for_turn = AsyncMock(return_value=TurnEndResult(status="matched"))
 
     chunks = []
     async for chunk in d.send_and_stream("hi", timeout=10000):
@@ -272,12 +273,14 @@ async def test_progressing_generation_does_not_raise(monkeypatch):
     state = {"phase1_polls": 0, "phase2_polls": 0, "text": ""}
 
     async def _fake_js(expr, timeout=15):
+        if "location.href" in expr:
+            return "https://chatgpt.com/c/test-current-turn"
         if "has_action" in expr:
             state["phase2_polls"] += 1
             state["text"] += "x"
             done = state["phase2_polls"] > 200  # ~100s of progress
             return json.dumps({"text": state["text"], "has_action": done})
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal"})
         state["phase1_polls"] += 1
         return "1" if state["phase1_polls"] > 1 else "0"
@@ -286,8 +289,10 @@ async def test_progressing_generation_does_not_raise(monkeypatch):
     d.type_message = AsyncMock()
     d.click_send = AsyncMock()
     d._fetch_text_for_turn = AsyncMock(
-        return_value=TurnTextResult(status="matched", text=state["text"])
+        side_effect=lambda *a, **kw: TurnTextResult(status="matched", text=state["text"])
     )
+    d._fetch_end_turn_for_turn = AsyncMock(side_effect=lambda *a, **kw: TurnEndResult(
+        status="matched" if state["phase2_polls"] > 200 else "not_ready"))
 
     chunks = []
     async for chunk in d.send_and_stream("hi", timeout=100000):
@@ -326,7 +331,9 @@ async def test_thinking_model_streams_during_answer_phase(monkeypatch):
     state = {"phase1": 0, "phase2": 0, "text": ""}
 
     async def _fake_js(expr, timeout=15):
-        if "body.innerText" in expr:
+        if "location.href" in expr:
+            return "https://chatgpt.com/c/test-current-turn"
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal"})
         if "has_action" in expr:
             state["phase2"] += 1
@@ -350,7 +357,7 @@ async def test_thinking_model_streams_during_answer_phase(monkeypatch):
     d.type_message = AsyncMock()
     d.click_send = AsyncMock()
     d._fetch_text_for_turn = AsyncMock(
-        return_value=TurnTextResult(status="not_ready")
+        return_value=TurnTextResult(status="matched", text="answer chunk. verified answer")
     )  # fallback lag → empty
 
     chunks = []
@@ -388,12 +395,14 @@ async def test_phase2_end_turn_fallback_completes_when_dom_action_missing(monkey
     state = {"count_polls": 0}
 
     async def _fake_js(expr, timeout=15):
+        if "location.href" in expr:
+            return "https://chatgpt.com/c/test-current-turn"
         if "has_action" in expr:
             # DOM action button NEVER appears (simulates selector drift).
             return json.dumps(
                 {"text": "the full answer", "html_len": 10, "child_count": 1, "has_action": False}
             )
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal page"})
         state["count_polls"] += 1
         return "1" if state["count_polls"] > 1 else "0"
@@ -443,7 +452,7 @@ async def test_phase2_end_turn_fallback_ignored_on_fetch_failure(monkeypatch):
             return json.dumps(
                 {"text": "partial", "html_len": 10, "child_count": 1, "has_action": False}
             )
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal page"})
         state["count_polls"] += 1
         return "1" if state["count_polls"] > 1 else "0"
@@ -489,7 +498,7 @@ async def test_phase2_end_turn_fallback_skipped_when_no_text(monkeypatch):
         if "has_action" in expr:
             # No text streamed (empty answer).
             return json.dumps({"text": "", "html_len": 0, "child_count": 0, "has_action": False})
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal page"})
         state["count_polls"] += 1
         return "1" if state["count_polls"] > 1 else "0"
@@ -534,6 +543,8 @@ async def test_phase2_backend_end_turn_is_primary_over_dom(monkeypatch):
     state = {"count_polls": 0}
 
     async def _fake_js(expr, timeout=15):
+        if "location.href" in expr:
+            return "https://chatgpt.com/c/test-current-turn"
         if "has_action" in expr:
             return json.dumps(
                 {
@@ -545,7 +556,7 @@ async def test_phase2_backend_end_turn_is_primary_over_dom(monkeypatch):
                     "is_thinking": False,
                 }
             )
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal page"})
         state["count_polls"] += 1
         return "1" if state["count_polls"] > 1 else "0"
@@ -553,9 +564,7 @@ async def test_phase2_backend_end_turn_is_primary_over_dom(monkeypatch):
     d._js_strict = _fake_js
     d.type_message = AsyncMock()
     d.click_send = AsyncMock()
-    d._fetch_text_for_turn = AsyncMock(
-        return_value=TurnTextResult(status="matched", text="answer")
-    )
+    d._fetch_text_for_turn = AsyncMock(return_value=TurnTextResult(status="matched", text="answer"))
 
     async def _counting_end_turn(cid, anchor, *, had_non_text_content=False):
         end_turn_calls["n"] += 1
@@ -596,6 +605,8 @@ async def test_thinking_placeholder_does_not_stall_past_90s(monkeypatch):
     state = {"count_polls": 0, "phase2_polls": 0, "end_turn_calls": 0}
 
     async def _fake_js(expr, timeout=15):
+        if "location.href" in expr:
+            return "https://chatgpt.com/c/test-current-turn"
         if "has_action" in expr:
             state["phase2_polls"] += 1
             if state["phase2_polls"] > 10:
@@ -619,7 +630,7 @@ async def test_thinking_placeholder_does_not_stall_past_90s(monkeypatch):
                     "is_thinking": True,
                 }
             )
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal page"})
         state["count_polls"] += 1
         return "1" if state["count_polls"] > 1 else "0"
@@ -634,9 +645,7 @@ async def test_thinking_placeholder_does_not_stall_past_90s(monkeypatch):
     # Backend says not-done during thinking, then done once the answer appears.
     async def _end_turn(cid, anchor, *, had_non_text_content=False):
         state["end_turn_calls"] += 1
-        return TurnEndResult(
-            status="matched" if state["phase2_polls"] > 10 else "not_ready"
-        )
+        return TurnEndResult(status="matched" if state["phase2_polls"] > 10 else "not_ready")
 
     d._fetch_end_turn_for_turn = _end_turn
 
@@ -664,6 +673,8 @@ async def test_saw_thinking_unlocks_fallback_but_empty_end_turn_does_not_finish(
     state = {"count_polls": 0}
 
     async def _fake_js(expr, timeout=15):
+        if "location.href" in expr:
+            return "https://chatgpt.com/c/test-current-turn"
         if "has_action" in expr:
             return json.dumps(
                 {
@@ -675,7 +686,7 @@ async def test_saw_thinking_unlocks_fallback_but_empty_end_turn_does_not_finish(
                     "is_thinking": True,
                 }
             )
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal page"})
         state["count_polls"] += 1
         return "1" if state["count_polls"] > 1 else "0"
@@ -690,12 +701,13 @@ async def test_saw_thinking_unlocks_fallback_but_empty_end_turn_does_not_finish(
     # guard prevents completing on empty. The loop runs to the deadline and
     # returns WITHOUT emitting any delta — proving the fallback didn't
     # prematurely complete on an empty end_turn.
+    from chatgpt_web2api.turn_anchor import TurnReconciliationError
+
     chunks = []
-    async for chunk in d.send_and_stream("think", timeout=5):
-        chunks.append(chunk)
-    assert not any(c.delta for c in chunks), (
-        "fallback must not complete an empty answer even with end_turn=true"
-    )
+    with pytest.raises(TurnReconciliationError):
+        async for chunk in d.send_and_stream("think", timeout=5):
+            chunks.append(chunk)
+    assert not any(c.delta for c in chunks)
 
 
 @pytest.mark.asyncio
@@ -716,6 +728,8 @@ async def test_saw_thinking_with_end_turn_and_content_finishes(monkeypatch):
     state = {"count_polls": 0}
 
     async def _fake_js(expr, timeout=15):
+        if "location.href" in expr:
+            return "https://chatgpt.com/c/test-current-turn"
         if "has_action" in expr:
             return json.dumps(
                 {
@@ -727,7 +741,7 @@ async def test_saw_thinking_with_end_turn_and_content_finishes(monkeypatch):
                     "is_thinking": False,
                 }
             )
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal page"})
         state["count_polls"] += 1
         return "1" if state["count_polls"] > 1 else "0"

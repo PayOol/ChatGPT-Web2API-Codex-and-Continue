@@ -5,6 +5,11 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.venv/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+*.log
 .auth_token
 captured_*.json
 sentinel_flow.json

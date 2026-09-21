@@ -1,0 +1,45 @@
+{
+  "version": "0.3.0",
+  "platform": "win32-x64",
+  "python": "3.14.3",
+  "codex": "0.154.0",
+  "hostinger": "1.63.2",
+  "downloads": {
+    "uv": {
+      "url": "https://github.com/astral-sh/uv/releases/download/0.12.17/uv-x86_64-pc-windows-msvc.zip",
+      "sha256": "a252121d5b59398fcb137c6ea448176459a44010f33f67e0072305a637119ca7",
+      "version": "0.12.17",
+      "file": "uv.zip"
+    },
+    "git": {
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/MinGit-2.55.0.5-64-bit.zip",
+      "sha256": "56d7b226b7693196cfc71fef26568f536c4a021ab6c37ff2db4287bed908e96e",
+      "version": "v2.55.0.windows.5",
+      "file": "git.zip"
+    },
+    "rg": {
+      "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip",
+      "sha256": "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5",
+      "version": "15.2.0",
+      "file": "rg.zip"
+    },
+    "vscode": {
+      "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/7debcd0e2acdea1c52de81bf9ee1620444407dda/VSCode-win32-x64-1.138.0.zip",
+      "sha256": "c0a9f12a0d8962fa4cda1959eecd5fdd3f82de9715ad4dadd5601856bb60fd21",
+      "version": "1.138.0",
+      "file": "vscode.zip"
+    },
+    "node": {
+      "url": "https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip",
+      "sha256": "313fa40c0d7b18575821de8cb17483031fe07d95de5994f6f435f3b345f85c66",
+      "version": "24.14.0",
+      "file": "node.zip"
+    },
+    "continue": {
+      "url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/Continue/vsextensions/continue/2.0.0/vspackage?targetPlatform=win32-x64",
+      "sha256": "d681aca70f24e1a3b9adea8d9bbe4d24d954ae74f71c7b648ed589e53dc8354b",
+      "version": "2.0.0",
+      "file": "continue.vsix"
+    }
+  }
+}

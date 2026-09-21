@@ -9,6 +9,8 @@ This tests the error-mapping seam directly (APIServer._error_response),
 which both the streaming and non-streaming paths use.
 """
 
+import json
+
 from aiohttp import web
 
 from chatgpt_web2api.api_server import APIServer
@@ -20,10 +22,12 @@ def _server():
     from unittest.mock import MagicMock
 
     from chatgpt_web2api.config import Config
+
     return APIServer(Config.load(None), MagicMock())
 
 
 # ── RateLimitError -> standard OpenAI 429 ──────────────────────
+
 
 def test_rate_limit_error_maps_to_429():
     """A RateLimitError produces HTTP 429 with the OpenAI rate-limit body."""
@@ -54,6 +58,7 @@ def test_rate_limit_error_uses_default_retry_after_when_absent():
 
 # ── other errors stay 500 (not falsely retriable) ─────────────
 
+
 def test_generic_runtime_error_maps_to_500():
     """A plain RuntimeError stays a 500 server_error (NOT a retriable 429)."""
     server = _server()
@@ -64,16 +69,18 @@ def test_generic_runtime_error_maps_to_500():
     assert "Retry-After" not in resp.headers
 
 
-def test_timeout_error_maps_to_500():
-    """TimeoutError is a server-side failure, not a rate limit."""
-    server = _server()
-    resp = server._error_response(TimeoutError("timed out"))
-    assert resp.status == 500
+def test_timeout_error_prevents_uncertain_resubmission():
+    """An observation timeout does not prove the send failed; prevent SDK retry."""
+    resp = _server()._error_response(TimeoutError("timed out"))
+    assert resp.status == 422
+    assert resp.headers["x-should-retry"] == "false"
+    assert json.loads(resp.text)["error"]["code"] == "send_outcome_uncertain"
 
 
 def _body(resp: web.Response) -> dict:
     """Extract the JSON body from a prepared aiohttp Response."""
     import json
+
     # aiohttp Response.text is a coroutine in a running loop; for tests we
     # read the raw body that json_response serializes eagerly.
     return json.loads(resp.body)

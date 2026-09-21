@@ -46,7 +46,7 @@ async def test_image_response_does_not_stall(monkeypatch):
     state = {"phase1_polls": 0, "phase2_polls": 0}
 
     async def _fake_js(expr, timeout=15):
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal"})
         if "has_action" in expr:
             # Phase 2 poll (now has html_len — distinguishes from Phase 1)
@@ -73,9 +73,7 @@ async def test_image_response_does_not_stall(monkeypatch):
     d.click_send = AsyncMock()
     # A2: image turn — selector reports non_text so the reconciliation loop
     # breaks to the placeholder path (last_dom_text empty + had_non_text_content).
-    d._fetch_text_for_turn = AsyncMock(
-        return_value=TurnTextResult(status="non_text")
-    )
+    d._fetch_text_for_turn = AsyncMock(return_value=TurnTextResult(status="non_text"))
 
     chunks = []
     async for chunk in d.send_and_stream("generate an image", timeout=10000):
@@ -107,7 +105,9 @@ async def test_text_response_streams_delta_unchanged(monkeypatch):
     state = {"phase1": 0, "phase2": 0, "text": ""}
 
     async def _fake_js(expr, timeout=15):
-        if "body.innerText" in expr:
+        if "location.href" in expr:
+            return "https://chatgpt.com/c/test-current-turn"
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal"})
         if "has_action" in expr:
             state["phase2"] += 1
@@ -132,7 +132,7 @@ async def test_text_response_streams_delta_unchanged(monkeypatch):
     # A2: _fake_js has no location.href handler → conv_id never resolves →
     # reconciliation skipped. Mapped to not_ready (faithful to old "").
     d._fetch_text_for_turn = AsyncMock(
-        return_value=TurnTextResult(status="not_ready")
+        return_value=TurnTextResult(status="matched", text="Hello world. exact backend text")
     )
 
     chunks = []
@@ -167,7 +167,7 @@ async def test_placeholder_on_empty_fetch_with_non_text_content(monkeypatch):
     state = {"phase1": 0, "phase2": 0}
 
     async def _fake_js(expr, timeout=15):
-        if "body.innerText" in expr:
+        if "body.innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return json.dumps({"text": "normal"})
         if "has_action" in expr:
             state["phase2"] += 1
@@ -192,9 +192,7 @@ async def test_placeholder_on_empty_fetch_with_non_text_content(monkeypatch):
     d.click_send = AsyncMock()
     # A2: non-text turn (html_len=200>50 → had_non_text_content). Selector
     # reports non_text → reconciliation breaks to the placeholder path.
-    d._fetch_text_for_turn = AsyncMock(
-        return_value=TurnTextResult(status="non_text")
-    )
+    d._fetch_text_for_turn = AsyncMock(return_value=TurnTextResult(status="non_text"))
     # Updated for #12: backend end_turn is primary when conv_id is available.
     # This test's URL resolves to /c/test-conv-123, so the backend is consulted.
     # end_turn confirms completion once the non-text content is present.

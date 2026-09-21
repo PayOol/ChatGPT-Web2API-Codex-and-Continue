@@ -44,14 +44,20 @@ def _make_detector(budgets=None, conv_id="conv-1"):
     return detector, driver
 
 
-def _phase2_poll_payload(*, text="", md_text="", is_thinking=False,
-                         has_action=False, html_len=0, child_count=0):
+def _phase2_poll_payload(
+    *, text="", md_text="", is_thinking=False, has_action=False, html_len=0, child_count=0
+):
     """Build the JSON the phase-2 poll JS returns."""
-    return json.dumps({
-        "text": text, "md_text": md_text, "html_len": html_len,
-        "child_count": child_count, "has_action": has_action,
-        "is_thinking": is_thinking,
-    })
+    return json.dumps(
+        {
+            "text": text,
+            "md_text": md_text,
+            "html_len": html_len,
+            "child_count": child_count,
+            "has_action": has_action,
+            "is_thinking": is_thinking,
+        }
+    )
 
 
 class _ScriptedPoll:
@@ -72,7 +78,7 @@ class _ScriptedPoll:
             if self._idx < len(self.polls):
                 return self.polls[self._idx]
             return self.polls[-1] if self.polls else _phase2_poll_payload()
-        if "innerText" in expr:
+        if "innerText" in expr or "[role=dialog],[role=alert]" in expr:
             return self.scan
         return "1"
 
@@ -113,7 +119,8 @@ async def test_reasoning_first_content_survives_past_90s(monkeypatch):
     # before the first-content budget.
     async def drain():
         async for _ in detector.stream_until_complete(
-            initial_count=0, timeout=500,
+            initial_count=0,
+            timeout=500,
             turn_anchor=TurnAnchor(sent_text="test", mode="fresh_chat"),
             budgets=budgets,
         ):
@@ -156,7 +163,7 @@ async def test_stream_idle_uses_shorter_budget_after_first_content(monkeypatch):
 
     budgets = DetectorBudgets(
         first_content_timeout_seconds=300,  # long
-        stream_idle_timeout_seconds=5,       # short — will fire fast
+        stream_idle_timeout_seconds=5,  # short — will fire fast
         hard_timeout_seconds=900,
     )
     detector, driver = _make_detector(budgets=budgets)
@@ -168,9 +175,7 @@ async def test_stream_idle_uses_shorter_budget_after_first_content(monkeypatch):
     ] * 50  # repeat to keep polling
     script = _ScriptedPoll(polls)
     driver._js_strict = script
-    driver._fetch_end_turn_for_turn = AsyncMock(
-        return_value=TurnEndResult(status="not_ready")
-    )
+    driver._fetch_end_turn_for_turn = AsyncMock(return_value=TurnEndResult(status="not_ready"))
 
     t = [0.0]
     original_sleep = asyncio.sleep
@@ -184,7 +189,8 @@ async def test_stream_idle_uses_shorter_budget_after_first_content(monkeypatch):
 
     with pytest.raises(GenerationStuckError) as exc_info:
         async for _ in detector.stream_until_complete(
-            initial_count=0, timeout=500,
+            initial_count=0,
+            timeout=500,
             turn_anchor=TurnAnchor(sent_text="test", mode="fresh_chat"),
             budgets=budgets,
         ):
@@ -229,7 +235,8 @@ async def test_hard_cap_wins_over_dom_liveness(monkeypatch):
 
     with pytest.raises(GenerationStuckError):
         async for _ in detector.stream_until_complete(
-            initial_count=0, timeout=500,
+            initial_count=0,
+            timeout=500,
             turn_anchor=TurnAnchor(sent_text="test", mode="fresh_chat"),
             budgets=budgets,
         ):
@@ -270,14 +277,13 @@ async def test_final_reconciliation_success_returns_normally(monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", fast_sleep)
 
     # Final reconciliation: backend says the turn completed
-    driver._fetch_end_turn_for_turn = AsyncMock(
-        return_value=TurnEndResult(status="matched")
-    )
+    driver._fetch_end_turn_for_turn = AsyncMock(return_value=TurnEndResult(status="matched"))
 
     chunks = []
     # This should NOT raise — reconciliation finds the completed turn.
     async for chunk in detector.stream_until_complete(
-        initial_count=0, timeout=500,
+        initial_count=0,
+        timeout=500,
         turn_anchor=TurnAnchor(sent_text="test", mode="fresh_chat"),
         budgets=budgets,
     ):
@@ -307,9 +313,7 @@ async def test_structured_stall_error_has_diagnostic_fields(monkeypatch):
     # No text, no thinking, no progress → first_content_timeout stall
     script = _ScriptedPoll([_phase2_poll_payload()])
     driver._js_strict = script
-    driver._fetch_end_turn_for_turn = AsyncMock(
-        return_value=TurnEndResult(status="not_ready")
-    )
+    driver._fetch_end_turn_for_turn = AsyncMock(return_value=TurnEndResult(status="not_ready"))
 
     t = [0.0]
     original_sleep = asyncio.sleep
@@ -323,7 +327,8 @@ async def test_structured_stall_error_has_diagnostic_fields(monkeypatch):
 
     with pytest.raises(GenerationStuckError) as exc_info:
         async for _ in detector.stream_until_complete(
-            initial_count=0, timeout=500,
+            initial_count=0,
+            timeout=500,
             turn_anchor=TurnAnchor(sent_text="test", mode="fresh_chat"),
             budgets=budgets,
             model="gpt-5-5-thinking",

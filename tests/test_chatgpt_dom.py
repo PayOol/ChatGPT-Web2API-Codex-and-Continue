@@ -172,7 +172,7 @@ async def test_click_send_records_success_through_driver_breaker():
     dom, driver = _make_dom()
     reg = BreakerRegistry()
     driver._breakers = reg
-    driver._js = AsyncMock(return_value="sent")
+    driver._js_strict = AsyncMock(return_value='{"status":"ready","x":10,"y":20}')
 
     await dom.click_send()
     # Not open after a success record (record_success clears failures).
@@ -284,13 +284,16 @@ async def test_click_send_waits_then_sends(monkeypatch):
 
     dom, driver = _make_dom()
     # First 3 readiness checks → "no" (button not ready), then "yes", then "sent".
-    driver._js = AsyncMock(side_effect=["no", "no", "no", "yes", "sent"])
+    driver._js_strict = AsyncMock(
+        side_effect=['{"status":"missing"}'] * 3 + ['{"status":"ready","x":10,"y":20}']
+    )
 
     await dom.click_send()  # must not raise
 
     # The readiness poll should have run 4 times (3×"no" + 1×"yes"), then the
     # click once ("sent") = 5 total _js calls.
-    assert driver._js.await_count == 5, f"expected 5 _js calls, got {driver._js.await_count}"
+    assert driver._js_strict.await_count == 4
+    assert driver._cdp.await_count == 3  # trusted move, press, release
 
 
 @pytest.mark.asyncio
@@ -304,9 +307,9 @@ async def test_click_send_raises_on_budget_exhausted(monkeypatch):
 
     dom, driver = _make_dom()
     # Every _js call returns "no" — button never appears.
-    driver._js = AsyncMock(return_value="no")
+    driver._js_strict = AsyncMock(return_value='{"status":"missing"}')
 
     from chatgpt_web2api.cdp_driver import SendReadinessError
 
-    with pytest.raises(SendReadinessError, match="Send failed"):
+    with pytest.raises(SendReadinessError, match="Send not dispatched"):
         await dom.click_send()

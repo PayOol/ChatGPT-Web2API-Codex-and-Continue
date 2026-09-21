@@ -51,13 +51,18 @@ def _make_dom(diag_json=None):
     driver._js = AsyncMock(return_value="")
     # The diagnostic JS is the only _js_strict call from click_send.
     # Return the diag payload (or old-style minimal if not provided).
-    driver._js_strict = AsyncMock(return_value=diag_json or json.dumps({
-        "url": "https://chatgpt.com/c/conv-1",
-        "title": "Test",
-        "body_preview": "",
-        "button_count": 142,
-        "textarea_count": 1,
-    }))
+    driver._js_strict = AsyncMock(
+        return_value=diag_json
+        or json.dumps(
+            {
+                "url": "https://chatgpt.com/c/conv-1",
+                "title": "Test",
+                "body_preview": "",
+                "button_count": 142,
+                "textarea_count": 1,
+            }
+        )
+    )
     driver._cdp = AsyncMock()
     driver._breakers = None
     driver._current_conv_id = "conv-1"
@@ -69,11 +74,13 @@ def _make_scripted_js(*, poll_result="no", send_result="no send button"):
     - The button poll contains 'disabled' (checking btn.disabled)
     - The send JS contains 'no send button' (the failure return string)
     """
+
     async def fake_js(expr, timeout=15):
         if "no send button" in expr:
             return send_result
         # Button poll (or any other _js call)
         return poll_result
+
     return fake_js
 
 
@@ -142,7 +149,7 @@ async def test_send_succeeds_with_submit_type_fallback():
     the composer form, the broader fallback should find it."""
     dom, driver = _make_dom()
 
-    driver._js = _make_scripted_js(poll_result="yes", send_result="sent")
+    driver._js_strict = AsyncMock(return_value='{"status":"ready","x":10,"y":20}')
     await dom.click_send()  # should NOT raise
 
 
@@ -158,9 +165,11 @@ async def test_error_distinguishes_empty_composer_from_missing_button(caplog):
     dom, driver = _make_dom()
 
     driver._js = _make_scripted_js(poll_result="no", send_result="no send button")
-    driver._js_strict = AsyncMock(return_value=_diag_json(
-        composer_text_length=0,  # EMPTY — injection failed!
-    ))
+    driver._js_strict = AsyncMock(
+        return_value=_diag_json(
+            composer_text_length=0,  # EMPTY — injection failed!
+        )
+    )
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(SendReadinessError) as exc_info:
@@ -187,18 +196,23 @@ async def test_diagnostic_captures_stop_button_when_generating(caplog):
     dom, driver = _make_dom()
 
     driver._js = _make_scripted_js(poll_result="no", send_result="no send button")
-    driver._js_strict = AsyncMock(return_value=_diag_json(
-        stop_button_present=True,
-        generating_indicator_present=True,
-        composer_enabled=False,
-    ))
+    driver._js_strict = AsyncMock(
+        return_value=_diag_json(
+            stop_button_present=True,
+            generating_indicator_present=True,
+            composer_enabled=False,
+        )
+    )
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(SendReadinessError):
             await dom.click_send()
 
-    diag_logs = [r for r in caplog.records if "diagnostic" in r.message.lower()
-                 or "selector" in r.message.lower()]
+    diag_logs = [
+        r
+        for r in caplog.records
+        if "diagnostic" in r.message.lower() or "selector" in r.message.lower()
+    ]
     assert len(diag_logs) >= 1
     log_msg = diag_logs[0].message
     assert "stop_button_present" in log_msg, (

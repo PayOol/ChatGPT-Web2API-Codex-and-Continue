@@ -25,6 +25,7 @@ from chatgpt_web2api.cdp_driver import (
 
 # ── Helpers ────────────────────────────────────────────────────
 
+
 def _make_driver():
     """A CDPDriver with a mocked websocket (no real connect)."""
     d = CDPDriver(cdp_port=9222)
@@ -35,6 +36,7 @@ def _make_driver():
 
 
 # ── 1. Selector constants target the new DOM, not the fallback ──
+
 
 def test_composer_selector_targets_prosemirror_textbox():
     """COMPOSER_SELECTOR must match the contenteditable ProseMirror div,
@@ -90,6 +92,7 @@ def test_send_button_fallback_kept_for_legacy_testid():
 
 # ── 2. type_message emits valid JS and hits the right element ───
 
+
 @pytest.mark.asyncio
 async def test_type_message_fails_loudly_when_no_composer(monkeypatch):
     """If neither the new composer nor the fallback exists, type_message
@@ -100,6 +103,7 @@ async def test_type_message_fails_loudly_when_no_composer(monkeypatch):
     # _js reports no composer found.
     async def _fake_js(expr, timeout=15):
         return "no composer"
+
     d._js = _fake_js
     d._capture_selector_diagnostic = AsyncMock()
 
@@ -118,16 +122,19 @@ async def test_type_message_focuses_new_composer_when_present(monkeypatch):
     async def _fake_js(expr, timeout=15):
         calls["js"].append(expr)
         return "composer"  # primary selector matched
+
     d._js = _fake_js
 
     async def _fake_cdp(method, params=None, timeout=15):
         calls["cdp"].append((method, params))
         return {}
+
     d._cdp = _fake_cdp
 
     async def _fake_strict(expr, timeout=15):
         calls["strict"].append(expr)
         return "hello"  # verify succeeds
+
     d._js_strict = _fake_strict
     # Bypass the platform-probe so _js_strict calls stay focused on verify.
     d._detect_select_all_modifier = AsyncMock(return_value=2)
@@ -145,8 +152,7 @@ async def test_type_message_focuses_new_composer_when_present(monkeypatch):
     assert COMPOSER_FALLBACK_SELECTOR not in verify_expr
 
     # Insert text dispatched via CDP Input.insertText.
-    assert any(m == "Input.insertText" and p["text"] == "hello"
-               for m, p in calls["cdp"])
+    assert any(m == "Input.insertText" and p["text"] == "hello" for m, p in calls["cdp"])
 
 
 @pytest.mark.asyncio
@@ -159,12 +165,14 @@ async def test_type_message_falls_back_to_legacy_textarea(monkeypatch):
     async def _fake_js(expr, timeout=15):
         calls["js"].append(expr)
         return "fallback"  # primary missed, fallback hit
+
     d._js = _fake_js
     d._cdp = AsyncMock(return_value={})
 
     async def _fake_strict(expr, timeout=15):
         calls["strict"].append(expr)
         return "hello"
+
     d._js_strict = _fake_strict
     d._detect_select_all_modifier = AsyncMock(return_value=2)
 
@@ -200,62 +208,46 @@ async def test_type_message_raises_when_verify_returns_empty(monkeypatch):
 
 # ── 3. click_send emits valid JS and hits the right button ──────
 
+
 @pytest.mark.asyncio
 async def test_click_send_fails_when_no_send_button(monkeypatch):
-    """No send button (new or legacy) → RuntimeError, not a silent no-op."""
     d = _make_driver()
-
-    async def _fake_js(expr, timeout=15):
-        return "no send button"
-    d._js = _fake_js
+    d._js_strict = AsyncMock(return_value='{"status":"missing"}')
     d._capture_selector_diagnostic = AsyncMock()
-
-    # The wait-for-button loop also returns 'no', so it polls all 10
-    # times then falls through. Patch asyncio.sleep to no-op so it's
-    # instant.
-    monkeypatch.setattr("chatgpt_web2api.cdp_driver.asyncio.sleep", AsyncMock())
-
-    with pytest.raises(RuntimeError, match="Send failed: no send button"):
+    d._cdp = AsyncMock()
+    monkeypatch.setattr("chatgpt_web2api.chatgpt_dom.SEND_BUTTON_POLL_MAX_WAIT_S", 0)
+    with pytest.raises(RuntimeError, match="Send not dispatched"):
         await d.click_send()
     d._capture_selector_diagnostic.assert_awaited_once()
+    d._cdp.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_click_send_emits_new_selector_first(monkeypatch):
-    """click_send's JS must try SEND_BUTTON_SELECTOR before the legacy
-    testid fallback — mirroring the new composer's DOM."""
+async def test_click_send_accepts_send_labels_and_legacy_testid(monkeypatch):
     d = _make_driver()
-    seen = []
-
-    async def _fake_js(expr, timeout=15):
-        seen.append(expr)
-        # Wait-loop returns 'yes' immediately, then the click returns 'sent'.
-        return "yes" if "yes" in expr or "'no'" in expr else "sent"
-    d._js = _fake_js
-    monkeypatch.setattr("chatgpt_web2api.cdp_driver.asyncio.sleep", AsyncMock())
-
+    d._js_strict = AsyncMock(return_value='{"status":"ready","x":10,"y":20}')
+    d._cdp = AsyncMock()
     await d.click_send()
-
-    # At least one expression referenced the new aria-label selector.
-    assert any(SEND_BUTTON_SELECTOR in e for e in seen), \
-        "click_send never referenced the new aria-label send selector"
-    # And it also carries the legacy fallback for older deployments.
-    assert any(SEND_BUTTON_FALLBACK_SELECTOR in e for e in seen), \
-        "click_send dropped the legacy testid fallback"
+    expression = d._js_strict.call_args.args[0]
+    assert "send-button" in expression
+    assert "send|envoyer" in expression
+    assert "stop-button" in expression
+    assert "b.type==='submit'" in expression
+    assert d._cdp.await_count == 3
 
 
 @pytest.mark.asyncio
-async def test_click_send_sent_on_success(monkeypatch):
-    """Happy path: button present + click dispatched → 'sent' logged, no raise."""
+async def test_click_send_sent_on_success():
     d = _make_driver()
-    d._js = AsyncMock(return_value="sent")
-    monkeypatch.setattr("chatgpt_web2api.cdp_driver.asyncio.sleep", AsyncMock())
-
-    # Should not raise.
+    d._js_strict = AsyncMock(return_value='{"status":"ready","x":10,"y":20}')
+    d._cdp = AsyncMock()
     await d.click_send()
+    assert d._cdp.call_args.args[0] == "Input.dispatchMouseEvent"
+    assert d._cdp.call_args.args[1]["type"] == "mouseReleased"
 
 
 # ── 4. Readiness checks accept the new composer ────────────────
+
 
 @pytest.mark.asyncio
 async def test_navigate_new_chat_ready_when_prosemirror_present(monkeypatch):
@@ -265,16 +257,20 @@ async def test_navigate_new_chat_ready_when_prosemirror_present(monkeypatch):
     d = _make_driver()
     d._cdp = AsyncMock(return_value={})  # Page.navigate
 
-    ready_returned = {"v": json.dumps({
-        "ready": True,
-        "url": "https://chatgpt.com/",
-    })}
+    ready_returned = {
+        "v": json.dumps(
+            {
+                "ready": True,
+                "url": "https://chatgpt.com/",
+            }
+        )
+    }
 
     async def _fake_js(expr, timeout=15):
         # Confirm the readiness expression references the new composer.
-        assert COMPOSER_SELECTOR in expr, \
-            "readiness check does not query the new composer selector"
+        assert COMPOSER_SELECTOR in expr, "readiness check does not query the new composer selector"
         return ready_returned["v"]
+
     d._js = _fake_js
     monkeypatch.setattr("chatgpt_web2api.cdp_driver.asyncio.sleep", AsyncMock())
 
@@ -282,6 +278,7 @@ async def test_navigate_new_chat_ready_when_prosemirror_present(monkeypatch):
 
 
 # ── 5. canonical composer verification (R1) ────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_type_message_retries_on_stale_text_then_succeeds(monkeypatch):
@@ -296,10 +293,12 @@ async def test_type_message_retries_on_stale_text_then_succeeds(monkeypatch):
     # First verify returns STALE text, the execCommand-clear call returns
     # "true", then the post-retry verify returns the correct input.
     verify_returns = ["old stale content", "true", "correct input"]
+
     async def _fake_strict(expr, timeout=15):
         # execCommand-clear + re-verify both call _js_strict; return the
         # sequence. The platform probe is bypassed via _detect_select_all_modifier.
         return verify_returns.pop(0) if verify_returns else ""
+
     d._js_strict = _fake_strict
     monkeypatch.setattr("chatgpt_web2api.cdp_driver.asyncio.sleep", AsyncMock())
 
@@ -311,9 +310,11 @@ async def test_verify_composer_text_canonicalizes_crlf_and_nbsp():
     """Canonical equality: CRLF→LF, NBSP→space are normalized; internal
     spacing is NOT collapsed (would hide code/YAML corruption)."""
     d = _make_driver()
+
     # Input with CRLF and NBSP; composer returns the same → match.
     async def _fake_strict(expr, timeout=15):
         return "line1\r\nline2\u00a0end"
+
     d._js_strict = _fake_strict
     assert await d._verify_composer_text(COMPOSER_SELECTOR, "line1\nline2 end") is True
 
@@ -323,8 +324,10 @@ async def test_verify_composer_text_tolerates_trailing_newline():
     """ProseMirror wraps input in a <p> and may append a trailing block
     newline; a single trailing newline must not fail verification."""
     d = _make_driver()
+
     async def _fake_strict(expr, timeout=15):
         return "hello\n"  # composer added a trailing newline
+
     d._js_strict = _fake_strict
     assert await d._verify_composer_text(COMPOSER_SELECTOR, "hello") is True
 
@@ -336,8 +339,10 @@ async def test_verify_composer_text_preserves_intended_trailing_newline():
     turned 'foo\\n' into 'foo' and failed a valid prompt. New logic accepts
     exact match OR actual == expected + one editor newline."""
     d = _make_driver()
+
     async def _fake_strict(expr, timeout=15):
         return "foo\n"  # actual matches expected exactly
+
     d._js_strict = _fake_strict
     assert await d._verify_composer_text(COMPOSER_SELECTOR, "foo\n") is True
 
@@ -347,8 +352,10 @@ async def test_verify_composer_text_does_not_collapse_internal_whitespace():
     """Broad whitespace collapse would hide corruption of code/Markdown
     indentation. Double spaces in the input must be preserved EXACTLY."""
     d = _make_driver()
+
     async def _fake_strict(expr, timeout=15):
         return "two  spaces"  # two spaces, as input
+
     d._js_strict = _fake_strict
     # Match: two spaces == two spaces.
     assert await d._verify_composer_text(COMPOSER_SELECTOR, "two  spaces") is True
@@ -381,12 +388,11 @@ async def test_verify_composer_text_extracts_multiline_via_block_aware_js():
         # The extractor, run against the measured DOM, must produce exactly
         # the typed input. We return what a correct extractor yields.
         return "line one.\n\nline two."
+
     d._js_strict = _fake_strict
 
     # A 2-newline input must verify — this is exactly what failed live.
-    assert await d._verify_composer_text(
-        COMPOSER_SELECTOR, "line one.\n\nline two."
-    ) is True
+    assert await d._verify_composer_text(COMPOSER_SELECTOR, "line one.\n\nline two.") is True
 
     # Contract: the extractor must NOT read innerText/textContent directly.
     expr = captured["expr"]
@@ -403,13 +409,13 @@ async def test_verify_composer_text_rejects_wrong_line_count():
     """If the extractor returns the WRONG number of newlines (the live bug),
     canonical equality must fail — proving the fix isn't just permissive."""
     d = _make_driver()
+
     # innerText-style over-count: 5 newlines for a 2-newline input.
     async def _fake_strict(expr, timeout=15):
         return "line one.\n\n\n\n\nline two."
+
     d._js_strict = _fake_strict
-    assert await d._verify_composer_text(
-        COMPOSER_SELECTOR, "line one.\n\nline two."
-    ) is False
+    assert await d._verify_composer_text(COMPOSER_SELECTOR, "line one.\n\nline two.") is False
 
 
 @pytest.mark.asyncio
@@ -429,6 +435,7 @@ async def test_detect_select_all_modifier_returns_ctrl_on_windows():
 
 
 # ── 6. token refresh preserves prior token on empty fetch (R2) ─────────
+
 
 @pytest.mark.asyncio
 async def test_refresh_token_preserves_prior_on_transient_empty(monkeypatch):

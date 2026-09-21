@@ -25,63 +25,48 @@ from chatgpt_web2api.cdp_driver import CDPDriver
 
 # ── 1. Static URL matcher ─────────────────────────────────────────────
 
+
 def test_url_match_exact_conversation_path():
     d = CDPDriver(cdp_port=9222)
     cid = "6a3a80c8-64bc-83eb-8967-66452f3d93b1"
-    assert d._is_url_at_conversation(
-        f"https://chatgpt.com/c/{cid}", cid
-    ) is True
+    assert d._is_url_at_conversation(f"https://chatgpt.com/c/{cid}", cid) is True
 
 
 def test_url_match_tolerates_query_string():
     d = CDPDriver(cdp_port=9222)
     cid = "abc-123"
-    assert d._is_url_at_conversation(
-        f"https://chatgpt.com/c/{cid}?model=auto&foo=bar", cid
-    ) is True
+    assert d._is_url_at_conversation(f"https://chatgpt.com/c/{cid}?model=auto&foo=bar", cid) is True
 
 
 def test_url_match_tolerates_trailing_slash():
     d = CDPDriver(cdp_port=9222)
     cid = "abc-123"
-    assert d._is_url_at_conversation(
-        f"https://chatgpt.com/c/{cid}/", cid
-    ) is True
+    assert d._is_url_at_conversation(f"https://chatgpt.com/c/{cid}/", cid) is True
 
 
 def test_url_match_rejects_different_conversation():
     """A different conversation id must NOT match — the original bug was
     substring matching that could admit the wrong conversation."""
     d = CDPDriver(cdp_port=9222)
-    assert d._is_url_at_conversation(
-        "https://chatgpt.com/c/different-id", "abc-123"
-    ) is False
+    assert d._is_url_at_conversation("https://chatgpt.com/c/different-id", "abc-123") is False
 
 
 def test_url_match_rejects_subpath_of_other_conversation():
     """Trailing path segments under a different conversation must not match."""
     d = CDPDriver(cdp_port=9222)
-    assert d._is_url_at_conversation(
-        "https://chatgpt.com/c/other-id/something", "abc-123"
-    ) is False
+    assert d._is_url_at_conversation("https://chatgpt.com/c/other-id/something", "abc-123") is False
 
 
 def test_url_match_rejects_non_conversation_url():
     d = CDPDriver(cdp_port=9222)
-    assert d._is_url_at_conversation(
-        "https://chatgpt.com/", "abc-123"
-    ) is False
-    assert d._is_url_at_conversation(
-        "https://chatgpt.com/g/some-gpt", "abc-123"
-    ) is False
+    assert d._is_url_at_conversation("https://chatgpt.com/", "abc-123") is False
+    assert d._is_url_at_conversation("https://chatgpt.com/g/some-gpt", "abc-123") is False
 
 
 def test_url_match_rejects_wrong_host():
     d = CDPDriver(cdp_port=9222)
     cid = "abc-123"
-    assert d._is_url_at_conversation(
-        f"https://evil.com/c/{cid}", cid
-    ) is False
+    assert d._is_url_at_conversation(f"https://evil.com/c/{cid}", cid) is False
 
 
 def test_url_match_rejects_empty_inputs():
@@ -100,6 +85,7 @@ def test_url_match_rejects_malformed_url():
 
 # ── 2. _is_live_conversation_url ──────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_live_url_true_when_href_matches():
     d = CDPDriver(cdp_port=9222)
@@ -113,12 +99,14 @@ async def test_live_url_false_on_cdp_read_failure():
     """An unreadable location.href must return False (fail-closed at the
     ensure_current_conversation layer, not here)."""
     from chatgpt_web2api.cdp_driver import CDPJSError
+
     d = CDPDriver(cdp_port=9222)
     d._js_strict = AsyncMock(side_effect=CDPJSError("context destroyed"))
     assert await d._is_live_conversation_url("abc-123") is False
 
 
 # ── 3. ensure_current_conversation ────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_ensure_current_no_op_when_live_url_matches():
@@ -160,9 +148,7 @@ async def test_ensure_current_raises_when_post_navigation_still_wrong():
     cid = "abc-123"
     d._current_conv_id = cid  # simulate stale local state
     # Both reads return the wrong URL.
-    d._js_strict = AsyncMock(
-        return_value="https://chatgpt.com/c/wrong-conv"
-    )
+    d._js_strict = AsyncMock(return_value="https://chatgpt.com/c/wrong-conv")
     d.navigate_conversation = AsyncMock()  # navigate succeeds (no raise)...
     # ...but the post-nav live check still says wrong, so ensure_current must
     # catch the discrepancy and raise.
@@ -178,17 +164,14 @@ async def test_ensure_current_raises_when_navigation_raises():
     """If navigate_conversation itself raises, the error propagates."""
     d = CDPDriver(cdp_port=9222)
     cid = "abc-123"
-    d._js_strict = AsyncMock(
-        return_value="https://chatgpt.com/c/wrong-conv"
-    )
-    d.navigate_conversation = AsyncMock(
-        side_effect=RuntimeError("did not reach a ready composer")
-    )
+    d._js_strict = AsyncMock(return_value="https://chatgpt.com/c/wrong-conv")
+    d.navigate_conversation = AsyncMock(side_effect=RuntimeError("did not reach a ready composer"))
     with pytest.raises(RuntimeError, match="did not reach a ready composer"):
         await d.ensure_current_conversation(cid)
 
 
 # ── 4. navigate_conversation verified-landing invariant ───────────────
+
 
 @pytest.mark.asyncio
 async def test_navigate_conversation_sets_id_only_on_verified_landing():
@@ -198,12 +181,16 @@ async def test_navigate_conversation_sets_id_only_on_verified_landing():
     d._cdp = AsyncMock()  # Page.navigate
     # P2: navigate_conversation now uses _js_strict with a staged probe.
     # Return a ready state at the right URL on first poll.
-    d._js_strict = AsyncMock(return_value=json.dumps({
-        "url": f"https://chatgpt.com/c/{cid}",
-        "ready_state": "complete",
-        "app_shell": True,
-        "composer": True,
-    }))
+    d._js_strict = AsyncMock(
+        return_value=json.dumps(
+            {
+                "url": f"https://chatgpt.com/c/{cid}",
+                "ready_state": "complete",
+                "app_shell": True,
+                "composer": True,
+            }
+        )
+    )
     await d.navigate_conversation(cid)
     assert d._current_conv_id == cid
 
@@ -218,15 +205,21 @@ async def test_navigate_conversation_raises_and_clears_when_never_ready(monkeypa
     d._current_conv_id = cid  # pre-existing (possibly stale) state
     d._cdp = AsyncMock()
     # P2: staged probe — composer never ready.
-    d._js_strict = AsyncMock(return_value=json.dumps({
-        "url": f"https://chatgpt.com/c/{cid}",
-        "ready_state": "complete",
-        "app_shell": True,
-        "composer": False,  # composer never appears
-    }))
+    d._js_strict = AsyncMock(
+        return_value=json.dumps(
+            {
+                "url": f"https://chatgpt.com/c/{cid}",
+                "ready_state": "complete",
+                "app_shell": True,
+                "composer": False,  # composer never appears
+            }
+        )
+    )
+
     # Collapse the sleeps so the 30-iteration loop runs fast.
     async def _fast(_s):
         return None
+
     monkeypatch.setattr("chatgpt_web2api.cdp_driver.asyncio.sleep", _fast)
 
     # P2: error message now names the failed stage instead of the old opaque msg.
@@ -237,8 +230,9 @@ async def test_navigate_conversation_raises_and_clears_when_never_ready(monkeypa
 
 # ── 5. REST auto-continue calls the guard ─────────────────────────────
 
+
 @pytest.mark.asyncio
-async def test_rest_auto_continue_invokes_ensure_current(monkeypatch):
+async def test_rest_unmatched_request_starts_isolated_chat(monkeypatch):
     """The REST continue branch must call ensure_current_conversation instead
     of sleeping and trusting the local _current_conv_id.
 
@@ -249,7 +243,12 @@ async def test_rest_auto_continue_invokes_ensure_current(monkeypatch):
     """
     import chatgpt_web2api.api_server as srv
 
-    server = srv.APIServer.__new__(srv.APIServer)  # bypass __init__
+    server = srv.APIServer.__new__(srv.APIServer)
+    from chatgpt_web2api.agent_sessions import AgentState
+
+    server._agent_state = AgentState(interval=0)
+    server._last_successful_send_at = None
+    # Remaining fields below mirror __init__ for this isolated handler test.  # bypass __init__
     server._last_conv_id = "conv-rest-1"
     server._last_project_id = None
     server._request_count = 0
@@ -263,15 +262,18 @@ async def test_rest_auto_continue_invokes_ensure_current(monkeypatch):
     driver._current_model = None
     driver.select_model = AsyncMock(return_value=True)
     driver.ensure_current_conversation = AsyncMock()
+    driver.navigate_new_chat = AsyncMock()
     server._driver = driver
 
     # Sentinel: _full_response records that we reached past the guard and
     # returns a dummy response. The handler catches exceptions, so we can't
     # rely on propagation; instead assert the guard ran AND we got this far.
     reached = {"past_guard": False}
+
     async def _stub_response(*a, **kw):
         reached["past_guard"] = True
         return MagicMock()
+
     server._full_response = _stub_response
     server._stream_response = _stub_response
 
@@ -279,27 +281,37 @@ async def test_rest_auto_continue_invokes_ensure_current(monkeypatch):
     # matching the server's _last_conv_id.
     request = MagicMock()
     request.headers = {}
-    request.json = AsyncMock(return_value={
-        "messages": [{"role": "user", "content": "hello"}],
-        "model": "auto",
-    })
+    request.json = AsyncMock(
+        return_value={
+            "messages": [{"role": "user", "content": "hello"}],
+            "model": "auto",
+        }
+    )
 
     # Bypass the cross-process file lock so the test runs without it.
     class _NullLock:
-        def __init__(self, *a, **kw): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
     monkeypatch.setattr(srv, "MutationLock", _NullLock)
 
     await server._handle_chat(request)
 
     # The guard ran (proving the continue branch was taken), and execution
     # reached _full_response (proving we proceeded past the guard correctly).
-    driver.ensure_current_conversation.assert_awaited_once_with("conv-rest-1")
+    driver.ensure_current_conversation.assert_not_awaited()
+    driver.navigate_new_chat.assert_awaited_once_with(gizmo_id=None)
     assert reached["past_guard"] is True
 
 
 # ── 6. MCP auto-continue calls the guard ──────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_mcp_auto_continue_invokes_ensure_current():
@@ -323,12 +335,15 @@ async def test_mcp_auto_continue_invokes_ensure_current():
     async def _boom(text, timeout=120, *, budgets=None, model=None):
         raise AssertionError("reached past the guard")
         yield  # pragma: no cover (generator signature)
+
     driver.send_and_stream = _boom
 
     cfg = Config.load(None)
     with pytest.raises(AssertionError, match="reached past the guard"):
         await mod.do_chat_completion(
-            driver, {"message": "hello"}, cfg,
+            driver,
+            {"message": "hello"},
+            cfg,
             on_progress=None,
         )
 
@@ -344,6 +359,7 @@ async def test_mcp_auto_continue_invokes_ensure_current():
 # "no close frame received or sent" 500 through REST. _ensure_send_ready
 # normalizes the tab into a chat page before connect() returns: a connected
 # driver is a send-capable driver.
+
 
 @pytest.mark.asyncio
 async def test_ensure_send_ready_noop_when_composer_present():
@@ -391,9 +407,7 @@ async def test_ensure_send_ready_fail_closed_when_composer_still_absent():
         await d._ensure_send_ready()
 
     d.navigate_new_chat.assert_awaited_once()
-    d._capture_selector_diagnostic.assert_awaited_once_with(
-        "composer (connect send-ready)"
-    )
+    d._capture_selector_diagnostic.assert_awaited_once_with("composer (connect send-ready)")
 
 
 def test_has_composer_parses_ready_flag_from_js():
@@ -402,6 +416,7 @@ def test_has_composer_parses_ready_flag_from_js():
     d = CDPDriver(cdp_port=9222)
     d._js = AsyncMock(return_value=json.dumps({"ready": True}))
     import asyncio
+
     assert asyncio.get_event_loop().run_until_complete(d._has_composer()) is True
 
     d._js = AsyncMock(return_value=json.dumps({"ready": False}))
@@ -418,6 +433,7 @@ async def test_connect_calls_ensure_send_ready_after_auth(monkeypatch):
 
     async def _noop_ws(*a, **kw):
         return MagicMock()
+
     # Stub the CDP plumbing so connect runs its body without a real Chrome.
     monkeypatch.setattr("chatgpt_web2api.cdp_driver.websockets.connect", _noop_ws)
     d._find_page_ws = lambda: "ws://fake"
@@ -427,13 +443,9 @@ async def test_connect_calls_ensure_send_ready_after_auth(monkeypatch):
     d._reader_loop = AsyncMock()
     d._live_target_ids = AsyncMock(return_value=[])
     d._wait_for_chatgpt_ready = AsyncMock()
-    d._refresh_token = AsyncMock(
-        side_effect=lambda: order.append("auth")
-    )
+    d._refresh_token = AsyncMock(side_effect=lambda: order.append("auth"))
     d._has_composer = AsyncMock(return_value=True)
-    d._ensure_send_ready = AsyncMock(
-        side_effect=lambda: order.append("send_ready")
-    )
+    d._ensure_send_ready = AsyncMock(side_effect=lambda: order.append("send_ready"))
     d._start_heartbeat = lambda: order.append("heartbeat")
 
     await d.connect()
@@ -453,6 +465,7 @@ async def test_connect_survives_send_readiness_failure(monkeypatch):
 
     async def _noop_ws(*a, **kw):
         return MagicMock()
+
     monkeypatch.setattr("chatgpt_web2api.cdp_driver.websockets.connect", _noop_ws)
     d._find_page_ws = lambda: "ws://fake"
     d._find_owned_tab_ws = lambda: None
@@ -480,14 +493,17 @@ async def test_connect_survives_send_readiness_failure(monkeypatch):
 # error forever, nothing triggered recovery. _cdp() now reconnects-once on a
 # dead socket and retries the call (guarded against recursion by _retry).
 
+
 def test_should_reconnect_recognizes_dead_socket_errors():
     """_should_reconnect returns True ONLY for socket-death signatures, never
     for timeouts or application errors (those must surface, not reconnect)."""
     assert CDPDriver._should_reconnect(Exception("no close frame received or sent")) is True
     assert CDPDriver._should_reconnect(Exception("Connection closed")) is True
+
     # Name-based check (websockets.ConnectionClosedError) without importing it
     class FakeConnectionClosedError(Exception):
         pass
+
     FakeConnectionClosedError.__name__ = "ConnectionClosedError"
     assert CDPDriver._should_reconnect(FakeConnectionClosedError("x")) is True
     # NOT reconnect triggers:
@@ -514,6 +530,7 @@ async def test_cdp_reconnects_and_retries_on_dead_socket():
             raise Exception("no close frame received or sent")
         # Second send on fresh_ws: simulate the reader resolving the future.
         import json as _json
+
         msg = _json.loads(payload)
         mid = msg["id"]
         # Resolve the pending future for this id with a canned response.
@@ -582,4 +599,3 @@ async def test_cdp_does_not_loop_if_reconnect_also_fails():
         await d._cdp("Runtime.evaluate")
 
     assert reconnect_calls["n"] == 1, "must reconnect at most ONCE, never loop"
-

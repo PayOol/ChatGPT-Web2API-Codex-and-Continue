@@ -55,6 +55,12 @@ class _Transient404(Exception):
     """
 
 
+class _ProjectionRateLimit(RuntimeError):
+    def __init__(self, retry_after: float):
+        self.retry_after = retry_after
+        super().__init__(f"Conversation read rate-limited; retry after {retry_after:.0f}s")
+
+
 # Re-check the access token if it's older than this. The observed ChatGPT
 # JWT has a ~10-day lifetime, so 1h is a conservative refresh interval: it
 # avoids unnecessary refetches on the happy path while guaranteeing a stale
@@ -76,6 +82,7 @@ class BackendClient:
 
     def __init__(self, driver) -> None:
         self._driver = driver
+        self._projection_not_before = 0.0
 
     # ── Token Management ──────────────────────────────────────
 
@@ -232,7 +239,11 @@ class BackendClient:
             return ""
         if not url or "/c/" not in url:
             return ""
-        return url.split("/c/")[1].split("/")[0].split("?")[0]
+        candidate = url.split("/c/")[1].split("/")[0].split("?")[0]
+        # The UI first uses WEB:<uuid>, which is not a backend conversation.
+        if candidate.upper().startswith(("WEB:", "WEB%3A")):
+            return ""
+        return candidate
 
     async def _get_live_conversation_id_best_effort(self) -> str:
         """Resolve the in-flight conversation id by cheapest available source.
@@ -265,9 +276,25 @@ class BackendClient:
     # _Transient404 (transient race, swallowed by the wrappers below),
     # other non-OK → RuntimeError, transport failure → fetch_failed status.
 
-    async def _fetch_recent_conversation_projection(
-        self, conversation_id: str
-    ) -> dict:
+    async def _fetch_recent_conversation_projection(self, conversation_id: str) -> dict:
+        """Throttle reads and retry HTTP 429 without resending the user prompt."""
+        for attempt in range(3):
+            delay = self._projection_not_before - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            self._projection_not_before = time.monotonic() + 2.0
+            try:
+                return await self._fetch_recent_conversation_projection_once(conversation_id)
+            except _ProjectionRateLimit as exc:
+                self._projection_not_before = time.monotonic() + exc.retry_after
+                logger.warning(
+                    "Conversation read HTTP 429; waiting %.0fs before retry", exc.retry_after
+                )
+                if attempt == 2:
+                    raise
+        raise AssertionError("unreachable")
+
+    async def _fetch_recent_conversation_projection_once(self, conversation_id: str) -> dict:
         """Fetch and project the recent conversation mapping.
 
         Executes ``CONVERSATION_PROJECTION_JS`` via the driver's
@@ -305,6 +332,21 @@ class BackendClient:
                 raise AuthExpiredError()
             if status == 404:
                 raise _Transient404(conversation_id)
+            if status == 429:
+                import math
+                from email.utils import parsedate_to_datetime
+
+                retry_header = payload.get("retry_after")
+                try:
+                    delay = float(retry_header)
+                except (TypeError, ValueError):
+                    try:
+                        delay = parsedate_to_datetime(retry_header).timestamp() - time.time()
+                    except (TypeError, ValueError, AttributeError):
+                        delay = 30.0
+                if not math.isfinite(delay):
+                    delay = 30.0
+                raise _ProjectionRateLimit(max(1.0, delay))
             if status is not None:
                 raise RuntimeError(f"projection HTTP {status} for {conversation_id}")
         # Decode projection JS errors (the JS catches exceptions and returns
@@ -325,9 +367,7 @@ class BackendClient:
         except (json.JSONDecodeError, TypeError) as e:
             raise CDPJSError(f"projection returned unparseable JSON: {e}") from e
 
-    async def _fetch_text_for_turn(
-        self, conversation_id: str, anchor
-    ):
+    async def _fetch_text_for_turn(self, conversation_id: str, anchor):
         """Anchored final-text fetch for one turn.
 
         Fetches the projected mapping and runs ``select_text_for_turn`` to

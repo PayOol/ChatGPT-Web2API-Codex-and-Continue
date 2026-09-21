@@ -95,6 +95,7 @@ from .chatgpt_dom import (  # noqa: E402,F401
 # Stages (each must pass for the next to matter):
 #   url_correct → document_ready → app_shell_present → composer_present
 
+
 @dataclass
 class NavigationReadinessProbe:
     """Results of a single navigation-readiness probe poll.
@@ -103,6 +104,7 @@ class NavigationReadinessProbe:
     message naming the stage that failed. The JS probe evaluates all stages
     in one ``Runtime.evaluate`` call (no extra round-trips).
     """
+
     url: str
     ready_state: str
     app_shell_present: bool
@@ -119,10 +121,7 @@ class NavigationReadinessProbe:
         conversation_id; the probe doesn't).
         """
         return (
-            url_correct
-            and self.document_ready
-            and self.app_shell_present
-            and self.composer_present
+            url_correct and self.document_ready and self.app_shell_present and self.composer_present
         )
 
     def diagnostic_summary(self, url_correct: bool) -> str:
@@ -281,6 +280,7 @@ class CDPReconnectError(RuntimeError):
 
 # Phrases ChatGPT uses in its rate-limit pop-up + the ``is_rate_limited_text``
 # matcher moved to completion_detector.py (Phase 5 PR4); re-exported above.
+
 
 def parse_retry_after(text: str, default: int = RATE_LIMIT_DEFAULT_RETRY_AFTER) -> int:
     """Extract a retry-after duration in seconds from ChatGPT's pop-up text.
@@ -1374,8 +1374,7 @@ class CDPDriver:
                 url_correct = self._is_url_at_conversation(last_probe.url, conversation_id)
                 stage = last_probe.diagnostic_summary(url_correct)
                 raise RuntimeError(
-                    f"Navigation to {conversation_id} failed after 15s — "
-                    f"stage: {stage}"
+                    f"Navigation to {conversation_id} failed after 15s — stage: {stage}"
                 )
             raise RuntimeError(
                 f"Navigation to {conversation_id} failed — all probes errored "
@@ -1410,8 +1409,7 @@ class CDPDriver:
         # (rather than just finding the first "c") avoids false-positives if
         # a "c" segment appears earlier in a different context.
         return any(
-            parts[i] == "c" and parts[i + 1] == conversation_id
-            for i in range(len(parts) - 1)
+            parts[i] == "c" and parts[i + 1] == conversation_id for i in range(len(parts) - 1)
         )
 
     async def _is_live_conversation_url(self, conversation_id: str) -> bool:
@@ -1497,16 +1495,8 @@ class CDPDriver:
         """
         import time as _time
 
-        selector = (
-            "document.querySelectorAll("
-            "'[data-message-author-role=\"assistant\"]'"
-            ").length"
-        )
-        user_selector = (
-            "document.querySelectorAll("
-            "'[data-message-author-role=\"user\"]'"
-            ").length"
-        )
+        selector = "document.querySelectorAll('[data-message-author-role=\"assistant\"]').length"
+        user_selector = "document.querySelectorAll('[data-message-author-role=\"user\"]').length"
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             t0 = _time.monotonic()
@@ -1552,8 +1542,7 @@ class CDPDriver:
             # Retry or fail-closed.
             if attempt < max_attempts:
                 logger.warning(
-                    "send_baseline_failed: attempt=%d error=%s "
-                    "conv_id=%s — retrying",
+                    "send_baseline_failed: attempt=%d error=%s conv_id=%s — retrying",
                     attempt,
                     err,
                     self._current_conv_id or "(none)",
@@ -1596,7 +1585,8 @@ class CDPDriver:
         Polls briefly (3s at 0.5s intervals). Never raises.
         """
         import time as _time
-        from .chatgpt_dom import COMPOSER_SELECTOR, COMPOSER_FALLBACK_SELECTOR
+
+        from .chatgpt_dom import COMPOSER_FALLBACK_SELECTOR, COMPOSER_SELECTOR
 
         pre_send_count = getattr(self, "_pre_send_user_count", None)
         if pre_send_count is None:
@@ -1670,7 +1660,8 @@ class CDPDriver:
         if conv_id is None:
             # Fresh chat — no backend anchor possible until URL resolves.
             return TurnAnchor(
-                sent_text=text, mode="fresh_chat",
+                sent_text=text,
+                mode="fresh_chat",
                 pre_send_wall_time=pre_send_wall,
                 conversation_id_at_capture=None,
             )
@@ -1692,7 +1683,8 @@ class CDPDriver:
                     latest_asst_id = node.get("id") or _nid
                     latest_asst_ct = ct
             return TurnAnchor(
-                sent_text=text, mode="existing_conversation",
+                sent_text=text,
+                mode="existing_conversation",
                 latest_user_node_id=latest_user_id,
                 latest_user_create_time=latest_user_ct,
                 latest_assistant_node_id=latest_asst_id,
@@ -1704,18 +1696,41 @@ class CDPDriver:
             # Transient backend failure — degrade to wall-clock freshness.
             # AuthExpiredError propagates (caller's responsibility).
             from .cdp_driver import AuthExpiredError
+
             if isinstance(e, AuthExpiredError):
                 raise
             logger.warning(
                 "turn_anchor_degraded: backend anchor fetch failed for %s: %s — "
                 "using degraded_existing mode (sent_text + wall-clock freshness)",
-                conv_id, e,
+                conv_id,
+                e,
             )
             return TurnAnchor(
-                sent_text=text, mode="degraded_existing",
+                sent_text=text,
+                mode="degraded_existing",
                 pre_send_wall_time=pre_send_wall,
                 conversation_id_at_capture=conv_id,
             )
+
+    async def read_agent_exchange(self) -> dict:
+        """Read the last visible exchange without navigation or submission."""
+        from .agent_dom import AGENT_TEXT_JS
+
+        raw = await self._js_strict(
+            "(function(){"
+            + AGENT_TEXT_JS
+            + "var users=document.querySelectorAll('[data-message-author-role=user]');"
+            "var assistants=document.querySelectorAll('[data-message-author-role=assistant]');"
+            "var u=users[users.length-1],a=assistants[assistants.length-1];"
+            "var protocol=web2apiAgentText(a);"
+            "var c=location.pathname.match(/\\/c\\/([a-zA-Z0-9-]+)(?:\\/|$)/);"
+            "return JSON.stringify({conversation:c?c[1]:'',"
+            "user:u?((u.querySelector('.rich-text-user-turn,.whitespace-pre-wrap')||u).textContent||''):'',"
+            "assistant:protocol.text,literal:protocol.literal,unsafe_markup:protocol.unsafe_markup,"
+            "paired:!!(u&&a&&(u.compareDocumentPosition(a)&Node.DOCUMENT_POSITION_FOLLOWING)),"
+            "generating:!!document.querySelector('[data-testid=stop-button]')});})()"
+        )
+        return json.loads(raw)
 
     async def send_and_stream(
         self,
@@ -1724,6 +1739,9 @@ class CDPDriver:
         *,
         budgets=None,
         model: str | None = None,
+        response_validator=None,
+        response_marker: str | None = None,
+        image_paths: list[str] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Send a message and yield streaming response chunks.
 
@@ -1746,6 +1764,13 @@ class CDPDriver:
 
         # PR4 belt-and-suspenders: refuse to mutate the DOM in parallel mode.
         self._assert_owned_tab_required()
+        await self._dom.check_rate_limit()
+        completed_frame = getattr(self, "_agent_completed_frame", None)
+        if completed_frame:
+            from .composer_transport import settle_completed_turn
+
+            await settle_completed_turn(self, completed_frame)
+            self._agent_completed_frame = None
         # A1: count existing assistants BEFORE sending (fail-closed baseline).
         initial_count = await self._read_assistant_count_baseline()
 
@@ -1757,7 +1782,19 @@ class CDPDriver:
         # A2 Step 3+4: arm capture scope + build fallback anchor.
         # The fallback anchor captures pre-send state (backend node-ids/times
         # or wall-clock) for dual-anchor correlation if UUID capture fails.
-        fallback_anchor = await self._capture_pre_send_fallback_anchor(text)
+        if response_validator is not None:
+            # The per-request nonce correlates structured responses. Reusing
+            # an Agent chat must not poll the conversation HTTP endpoint.
+            from .turn_anchor import TurnAnchor
+
+            fallback_anchor = TurnAnchor(
+                sent_text=text,
+                mode="degraded_existing" if self._current_conv_id else "fresh_chat",
+                pre_send_wall_time=time.time(),
+                conversation_id_at_capture=self._current_conv_id,
+            )
+        else:
+            fallback_anchor = await self._capture_pre_send_fallback_anchor(text)
         if self._identity_listener is not None and self._identity_listener.is_alive():
             capture_scope = self._identity_listener.arm_capture_scope(
                 expected_text_hash=hash_sent_text(text),
@@ -1768,12 +1805,18 @@ class CDPDriver:
         try:
             # Type and send.
             await self.type_message(text)
+            if image_paths:
+                from .vision_bridge import attach_images
+
+                await attach_images(self, image_paths)
             await self.click_send()
 
             # A2 Step 6: wait for the IdentityListener to capture the UUID.
             captured_uuid = None
             if capture_scope is not None:
                 captured_uuid = await self._identity_listener.wait_for_captured_uuid(timeout=5.0)
+
+            await self._dom.check_rate_limit()
 
             # P0 send acknowledgment (ChatGPT review, conv 6a52f0f3):
             # click_send dispatches synthetic mouse events — that proves the
@@ -1792,7 +1835,13 @@ class CDPDriver:
             if not captured_uuid:
                 try:
                     acknowledged = await self._verify_send_acknowledged()
-                    if acknowledged is False:  # explicitly False, not None
+                    if acknowledged is False and response_validator is not None:
+                        # The UI can render late or virtualize user nodes.
+                        # Await this request's nonce instead of sending again.
+                        logger.warning(
+                            "Send acknowledgment inconclusive; waiting for the current Agent nonce without resending"
+                        )
+                    elif acknowledged is False:  # explicitly False, not None
                         raise SendReadinessError(
                             "Send not acknowledged — click dispatched but no user "
                             "message appeared (no UUID captured, user count unchanged, "
@@ -1820,8 +1869,14 @@ class CDPDriver:
                 turn_anchor=turn_anchor,
                 budgets=budgets,
                 model=model,
+                response_validator=response_validator,
+                response_marker=response_marker,
             ):
-                yield chunk
+                # DOM innerText loses Markdown and code indentation. Its length
+                # cannot be used as an offset into the raw backend response.
+                # Poll the DOM for lifecycle only; emit the exact anchored text
+                # below once ChatGPT has completed this turn.
+                pass
 
             # Wait for URL to become /c/{id}
             conv_id = ""
@@ -1833,12 +1888,23 @@ class CDPDriver:
                     continue
                 if "/c/" in url:
                     conv_id = url.split("/c/")[1].split("/")[0].split("?")[0]
-                    break
+                    if not conv_id.upper().startswith(("WEB:", "WEB%3A")):
+                        break
+                    conv_id = ""
                 await asyncio.sleep(0.5)
 
             if conv_id:
                 logger.info("Conversation: %s", conv_id)
                 self._current_conv_id = conv_id
+                if response_validator is not None:
+                    # The per-request nonce and strict JSON schema correlate
+                    # this completed DOM response without an extra backend GET.
+                    # Code inside JSON strings retains escaped newlines/spacing.
+                    structured_text = self._completion.validated_dom_text
+                    response_validator(structured_text)
+                    yield StreamChunk(delta=structured_text)
+                    yield StreamChunk(delta="", finish_reason="stop")
+                    return
                 last_dom_text = self._completion.last_dom_text
                 had_non_text_content = self._completion.had_non_text_content
                 # A2: anchored final-text reconciliation. The selector resolves
@@ -1852,9 +1918,8 @@ class CDPDriver:
                     last_status = result.status
                     last_diagnostic = result.diagnostic or {}
                     if result.status == "matched" and result.text:
-                        if len(result.text) > len(last_dom_text):
-                            yield StreamChunk(delta=result.text[len(last_dom_text):])
-                            last_dom_text = result.text
+                        yield StreamChunk(delta=result.text)
+                        last_dom_text = result.text
                         break
                     if result.status == "non_text":
                         # P2.5 RCA fix: non_text is NOT terminal here. The backend
@@ -1896,6 +1961,13 @@ class CDPDriver:
                         "use get_conversation to retrieve full content.]"
                     )
                     yield StreamChunk(delta=placeholder)
+            else:
+                raise TurnReconciliationError(
+                    conversation_id="",
+                    anchor_mode=turn_anchor.mode,
+                    last_status="not_ready",
+                    diagnostic={"reason": "persistent_conversation_id_unavailable"},
+                )
         finally:
             # A2 Step 9: ALWAYS clear the capture scope (failure-mode E).
             if capture_scope is not None:
@@ -1921,7 +1993,9 @@ class CDPDriver:
         to tri-state via ``collapse_to_end_turn_status``.
         """
         return await self._backend_client._fetch_end_turn_for_turn(
-            conversation_id, anchor, had_non_text_content=had_non_text_content,
+            conversation_id,
+            anchor,
+            had_non_text_content=had_non_text_content,
         )
 
     async def _conversation_id_from_url(self) -> str:

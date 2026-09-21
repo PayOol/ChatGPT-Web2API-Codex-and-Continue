@@ -90,8 +90,8 @@ SEND_BUTTON_FALLBACK_SELECTOR = 'button[data-testid="send-button"]'
 # changes the aria-label (selector drift), a submit-type button inside the
 # composer form is still the send affordance. This is the LAST resort.
 SEND_BUTTON_BROAD_SELECTOR = (
-    'form:has(#prompt-textarea) button[type="submit"],'
-    'form:has(.ProseMirror) button[type="submit"]'
+    'form:has(#prompt-textarea) button[type="submit"]:not([data-testid="stop-button"]),'
+    'form:has(.ProseMirror) button[type="submit"]:not([data-testid="stop-button"])'
 )
 
 # Send-button readiness poll. After a prior send completes (or under parallel
@@ -412,8 +412,12 @@ class ChatGPTDom:
         # NFC normalization: handles composed/decomposed Unicode sequences
         # (e.g., é as 'e'+U+0301 vs U+00E9). The turn-anchor matcher already
         # uses NFC; this brings the verifier to parity.
-        canon_actual = unicodedata.normalize("NFC", actual.replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " "))
-        canon_expected = unicodedata.normalize("NFC", expected.replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " "))
+        canon_actual = unicodedata.normalize(
+            "NFC", actual.replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " ")
+        )
+        canon_expected = unicodedata.normalize(
+            "NFC", expected.replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " ")
+        )
         # ProseMirror wraps input in a <p> and may append a trailing block
         # newline. Tolerate AT MOST ONE editor-added trailing newline — but
         # never strip a user-intended trailing newline. So accept an exact
@@ -421,64 +425,43 @@ class ChatGPTDom:
         return canon_actual == canon_expected or canon_actual == canon_expected + "\n"
 
     async def click_send(self) -> None:
-        """Click the send button via JS MouseEvent sequence.
+        """Click only a ready send control; never mistake Stop for Send."""
+        from .cdp_driver import SendReadinessError
+        from .composer_transport import click_control
 
-        The new composer has no ``data-testid="send-button"``; its send
-        affordance is the submit ``<button aria-label="Send ...">`` inside
-        the composer form. We prefer that, falling back to the legacy
-        testid selector for older deployments. The stop button (which
-        appears during generation) is explicitly excluded — it also
-        carries an aria-label, but never "Send".
-        """
-        d = self._driver
-        # Wait for the send button to appear and be enabled. Try the new
-        # aria-label selector first, then the legacy testid fallback. Time-
-        # budgeted (not a fixed iteration count) so the wait scales to the
-        # composer-reset window after a prior send — see
-        # SEND_BUTTON_POLL_MAX_WAIT_S for rationale.
         deadline = time.monotonic() + SEND_BUTTON_POLL_MAX_WAIT_S
-        while time.monotonic() < deadline:
-            has_btn = await d._js(
-                "(function() {"
-                f"  var btn = document.querySelector('{SEND_BUTTON_SELECTOR}')"
-                f"       || document.querySelector('{SEND_BUTTON_FALLBACK_SELECTOR}')"
-                f"       || document.querySelector('{SEND_BUTTON_BROAD_SELECTOR}');"
-                "  return btn && !btn.disabled ? 'yes' : 'no';"
-                "})()"
-            )
-            if has_btn == "yes":
-                break
+        while True:
+            result = await click_control(self._driver, "send")
+            if result == "clicked":
+                if self._driver._breakers is not None:
+                    from .breakers import BreakerKind
+
+                    self._driver._breakers.record_success(BreakerKind.COMPOSER_SEND_READINESS)
+                logger.info("Send click dispatched; awaiting acknowledgment")
+                return
+            if time.monotonic() >= deadline:
+                await self._driver._capture_selector_diagnostic("send control: " + result)
+                if self._driver._breakers is not None:
+                    from .breakers import BreakerKind
+
+                    self._driver._breakers.record_failure(
+                        BreakerKind.COMPOSER_SEND_READINESS, result
+                    )
+                raise SendReadinessError(f"Send not dispatched: composer {result}")
             await asyncio.sleep(SEND_BUTTON_POLL_INTERVAL_S)
 
-        result = await d._js(
-            "(function() {"
-            f"  var btn = document.querySelector('{SEND_BUTTON_SELECTOR}')"
-            f"       || document.querySelector('{SEND_BUTTON_FALLBACK_SELECTOR}')"
-            f"       || document.querySelector('{SEND_BUTTON_BROAD_SELECTOR}');"
-            "  if (!btn) return 'no send button';"
-            "  if (btn.disabled) return 'button disabled';"
-            "  var evts = ['pointerdown','mousedown','pointerup','mouseup','click'];"
-            "  for (var i = 0; i < evts.length; i++) {"
-            "    btn.dispatchEvent(new MouseEvent(evts[i], {bubbles:true, cancelable:true, view:window}));"
-            "  }"
-            "  return 'sent';"
-            "})()"
-        )
-        if result != "sent":
-            await d._capture_selector_diagnostic("send-button (click_send)")
-            if d._breakers:
-                d._breakers.record_failure(BreakerKind.COMPOSER_SEND_READINESS)
-            from .cdp_driver import SendReadinessError
-
-            raise SendReadinessError(f"Send failed: {result}")
-        logger.info("Message sent")
-        # Success: clear composer failure history and recover a half-open
-        # breaker. Only after the message is confirmed sent — not after
-        # type_message alone, since a successful type can still fail to send.
-        if d._breakers:
-            d._breakers.record_success(BreakerKind.COMPOSER_SEND_READINESS)
-
     # ── Rate-limit popup ──────────────────────────────────────
+
+    async def check_rate_limit(self) -> None:
+        """Recognize localized blocking notices before touching the composer."""
+        from .cdp_driver import RateLimitError, is_rate_limited_text
+
+        text = await self._driver._js_strict(
+            "Array.from(document.querySelectorAll('[role=dialog],[role=alert]'))"
+            ".map(e => e.textContent || '').join('\\n')"
+        )
+        if is_rate_limited_text(text):
+            raise RateLimitError.from_text(text)
 
     async def dismiss_rate_limit(self) -> bool:
         """Dismiss ChatGPT's 'Too many requests' pop-up by clicking 'Got it'.
@@ -501,13 +484,13 @@ class ChatGPTDom:
             "    var dlgs = document.querySelectorAll('[role=dialog]');"
             "    var target = null;"
             "    for (var i = 0; i < dlgs.length; i++) {"
-            "      if (/too many requests/i.test(dlgs[i].innerText || '')) { target = dlgs[i]; break; }"
+            "      if (/too many requests|trop de requêtes/i.test(dlgs[i].textContent || '')) { target = dlgs[i]; break; }"
             "    }"
             "    if (!target) return JSON.stringify({clicked: false});"
             "    var btns = target.querySelectorAll('button');"
             "    var btn = null;"
             "    for (var j = 0; j < btns.length; j++) {"
-            "      if ((btns[j].innerText || '').trim().toLowerCase() === 'got it') { btn = btns[j]; break; }"
+            "      if (/^(got it|j[’']ai compris)$/i.test((btns[j].textContent || '').trim())) { btn = btns[j]; break; }"
             "    }"
             "    if (!btn) return JSON.stringify({clicked: false});"
             "    btn.click();"
@@ -527,7 +510,7 @@ class ChatGPTDom:
         # Re-scan to confirm the pop-up cleared.
         try:
             scan = await d._js_strict(
-                "(function(){var t=(document.body&&document.body.innerText)||'';"
+                "(function(){var t=Array.from(document.querySelectorAll('[role=dialog],[role=alert]')).map(e=>e.textContent||'').join('\\n');"
                 "return JSON.stringify({text:t.slice(0,4000)});})()",
                 timeout=10,
             )
@@ -566,9 +549,9 @@ class ChatGPTDom:
                 "(function(){"
                 "  var composer = document.querySelector('" + COMPOSER_SELECTOR + "')"
                 "       || document.querySelector('" + COMPOSER_FALLBACK_SELECTOR + "');"
-                "  var sendCandidates = document.querySelectorAll('button[type=\"submit\"], button[aria-label*=\"Send\" i], button[data-testid=\"send-button\"]');"
+                '  var sendCandidates = document.querySelectorAll(\'button[type="submit"], button[aria-label*="Send" i], button[data-testid="send-button"]\');'
                 "  var enabledSend = Array.prototype.filter.call(sendCandidates, function(b){ return !b.disabled; });"
-                "  var stopBtn = document.querySelector('[data-testid=\"stop-button\"], button[aria-label*=\"Stop\" i]');"
+                '  var stopBtn = document.querySelector(\'[data-testid="stop-button"], button[aria-label*="Stop" i]\');'
                 "  return JSON.stringify({"
                 "    url: location.href,"
                 "    title: document.title,"
@@ -581,7 +564,7 @@ class ChatGPTDom:
                 "    send_candidates_count: sendCandidates.length,"
                 "    enabled_send_candidates_count: enabledSend.length,"
                 "    stop_button_present: !!stopBtn,"
-                "    generating_indicator_present: !!document.querySelector('[class*=\"result-thinking\"], [class*=\"generating\"]')"
+                '    generating_indicator_present: !!document.querySelector(\'[class*="result-thinking"], [class*="generating"]\')'
                 "  });"
                 "})()",
                 timeout=5,

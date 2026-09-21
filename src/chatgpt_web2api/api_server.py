@@ -12,23 +12,29 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import re
 import time
 import uuid
+from pathlib import Path
 
 from aiohttp import web
 
+from .agent_sessions import AgentState, UncertainSendError, digest
 from .breakers import BreakerKind, BreakerRegistry, CircuitOpenError
 from .cdp_driver import (
     AuthExpiredError,
     CDPDriver,
     GenerationStuckError,
     RateLimitError,
+    SendReadinessError,
     is_rate_limited_text,
 )
 from .config import Config
 from .cross_process_lock import LockAcquisitionError
 from .lock_resolver import MutationLock, OwnedTabRequiredError, resolve_mutation_lock
-from .resilience import retry_on_rate_limit
+from .tool_bridge import ToolBridge, ToolProtocolError, ToolRequestError
+from .vision_bridge import images_for_turn, normalize_images
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +83,16 @@ class APIServer:
         # Track last conversation for multi-turn continuity
         self._last_conv_id: str | None = None
         self._last_project_id: str | None = None
+        self._agent_state = AgentState(
+            Path(os.environ.get("W2A_STATE_DIR", str(Path.home() / ".chatgpt-web2api")))
+            / "agent-state.json"
+            if isinstance(driver, CDPDriver)
+            else None,
+            interval=30,
+        )
 
-        self.app = web.Application(client_max_size=10 * 1024 * 1024)
+        # Four 12 MiB images can exceed 64 MiB after base64 + JSON encoding.
+        self.app = web.Application(client_max_size=70 * 1024 * 1024)
         self.app.router.add_post("/v1/chat/completions", self._handle_chat)
         self.app.router.add_post("/chat/completions", self._handle_chat)
         self.app.router.add_get("/v1/models", self._handle_models)
@@ -179,6 +193,8 @@ class APIServer:
                 "cdp_connected": driver_connected,
                 "driver_connected": driver_connected,
                 "requests_served": self._request_count,
+                "tool_calling": "text-bridge-v1",
+                "image_inputs": True,
                 "started_at": self._started_at,
                 "last_successful_send_at": self._last_successful_send_at,
                 "last_error": self._last_error,
@@ -244,7 +260,19 @@ class APIServer:
                 status=400,
             )
 
-        messages = body.get("messages", [])
+        if not isinstance(body, dict):
+            return self._error_response(ToolRequestError("Request body must be an object"))
+        try:
+            tool_bridge = ToolBridge.from_request(body)
+        except ToolRequestError as exc:
+            return self._error_response(exc)
+
+        try:
+            messages, user_images = normalize_images(body.get("messages", []))
+        except (ValueError, OSError) as exc:
+            return self._error_response(ToolRequestError(str(exc)))
+        if user_images and tool_bridge is None:
+            tool_bridge = ToolBridge([], choice="none")
         if not messages:
             return web.json_response(
                 {"error": {"message": "No messages provided", "type": "invalid_request_error"}},
@@ -302,6 +330,19 @@ class APIServer:
         if system_parts:
             prefix = "[System Instructions]\n" + "\n".join(system_parts) + "\n\n"
         full_text = prefix + "\n".join(conversation_lines)
+        # Generate the Agent prompt after matching its already-sent history.
+        # A continuation sends only the new turns, not the whole repository again.
+        request_key = digest({k: v for k, v in body.items() if k != "stream"})
+        scope = digest(
+            [
+                model,
+                project_id,
+                conversation_id,
+                body.get("tools"),
+                body.get("tool_choice"),
+                body.get("parallel_tool_calls"),
+            ]
+        )
 
         model_slug = MODEL_MAP.get(model, model)
         timeout = self._config.server.request_timeout
@@ -356,6 +397,53 @@ class APIServer:
                 # already knowing the circuit is open.
                 await self._check_circuit_or_recover()
 
+                cached = self._agent_state.replies.get(request_key) if tool_bridge else None
+                if cached is not None:
+                    return await self._render_agent_reply(
+                        request, model_slug, cached[0], cached[1], stream
+                    )
+                reuse_id, offset = (
+                    self._agent_state.match(messages, scope) if tool_bridge else (None, 0)
+                )
+                try:
+                    image_paths = (
+                        images_for_turn(messages, user_images, offset) if tool_bridge else []
+                    )
+                except (ValueError, OSError) as exc:
+                    raise ToolRequestError(str(exc)) from exc
+                if tool_bridge:
+                    full_text = tool_bridge.prompt(messages[offset:])
+                    if image_paths:
+                        full_text = (
+                            f"This request includes {len(image_paths)} actual attached image(s). "
+                            "Inspect their pixels when relevant. Registered image references and user-image markers "
+                            "in the serialized history identify their source. Do not infer image contents from filenames.\n"
+                            + full_text
+                        )
+                    if reuse_id:
+                        full_text = (
+                            "Continue in this same conversation. Earlier project context remains available. "
+                            "The following serialized turns provide the authoritative call IDs and new results.\n"
+                            + full_text
+                        )
+                    if request_key in self._agent_state.uncertain:
+                        recovered = await self._recover_agent_reply(
+                            tool_bridge, full_text, request_key, reuse_id
+                        )
+                        if recovered:
+                            message, conv_id = recovered
+                            self._remember_agent_reply(
+                                request_key, messages, message, scope, conv_id
+                            )
+                            return await self._render_agent_reply(
+                                request, model_slug, message, conv_id, stream
+                            )
+                self._agent_state.check(request_key)
+                if isinstance(self._driver, CDPDriver):
+                    await self._driver._dom.check_rate_limit()
+                # Applies to Agent, title generation and apply calls alike.
+                await self._agent_state.reserve()
+
                 # Select model if specified (non-fatal on failure)
                 if model_slug and model_slug != "auto":
                     selected = await self._driver.select_model(model_slug)
@@ -366,33 +454,58 @@ class APIServer:
                         )
 
                 # Decide: continue existing conversation or start fresh?
-                if conversation_id:
+                if reuse_id:
+                    if self._driver._current_conv_id != reuse_id:
+                        await self._driver.navigate_conversation(reuse_id)
+                    logger.info(
+                        "Agent conversation reused: %s; incremental messages=%d",
+                        reuse_id,
+                        len(messages) - offset,
+                    )
+                elif conversation_id:
                     # Explicit conversation_id from client — navigate to it
                     await self._driver.navigate_conversation(conversation_id)
-                elif (
-                    self._last_conv_id
-                    and self._driver._current_conv_id == self._last_conv_id
-                    and project_id == self._last_project_id
-                    and not system_parts
-                ):
-                    # Same session, same project, no system prompt override — continue.
-                    # Reconcile against the live tab before sending: another process
-                    # sharing the Chrome tab may have navigated it since our last turn,
-                    # which would leave _current_conv_id stale. ensure_current_conversation
-                    # verifies location.href and navigates back if needed (fail-closed).
-                    logger.info("Continuing conversation: %s", self._last_conv_id)
-                    await self._driver.ensure_current_conversation(self._last_conv_id)
                 else:
-                    # Fresh chat
+                    # No matching Agent history: keep unrelated tasks isolated.
                     await self._driver.navigate_new_chat(gizmo_id=project_id)
                     self._last_project_id = project_id
 
+                if tool_bridge is not None:
+                    return await self._agent_response(
+                        request,
+                        model_slug,
+                        full_text,
+                        timeout,
+                        tool_bridge,
+                        stream,
+                        messages,
+                        scope,
+                        request_key,
+                        image_paths=image_paths,
+                    )
+                self._agent_state.begin(request_key)
+                self._agent_state.next_send = time.time() + self._agent_state.interval
+                self._agent_state.save()
+                previous_success = self._last_successful_send_at
                 if stream:
-                    return await self._stream_response(request, model_slug, full_text, timeout)
+                    result = await self._stream_response(request, model_slug, full_text, timeout)
                 else:
-                    return await self._full_response(request, model_slug, full_text, timeout)
+                    result = await self._full_response(request, model_slug, full_text, timeout)
+                if self._last_successful_send_at != previous_success:
+                    self._agent_state.complete(request_key)
+                return result
 
         except Exception as e:
+            if isinstance(e, RateLimitError):
+                if self._agent_state.cooldown_until <= time.time():
+                    self._agent_state.penalize(e.retry_after)
+                    try:
+                        await self._driver.dismiss_rate_limit()
+                    except Exception:
+                        pass
+                e = RateLimitError(
+                    retry_after=max(1, int(self._agent_state.cooldown_until - time.time()) + 1)
+                )
             logger.error("Chat error: %s", e, exc_info=True)
             self._last_error = f"{type(e).__name__}: {e}"
             return self._error_response(e)
@@ -437,6 +550,41 @@ class APIServer:
         - Everything else stays a 500 ``server_error`` (a real failure, not
           retriable).
         """
+        if isinstance(exc, ToolRequestError):
+            return web.json_response(
+                {
+                    "error": {
+                        "message": str(exc),
+                        "type": "invalid_request_error",
+                        "code": "invalid_tool_request",
+                    }
+                },
+                status=400,
+            )
+        if isinstance(exc, ToolProtocolError):
+            return web.json_response(
+                {
+                    "error": {
+                        "message": str(exc),
+                        "type": "server_error",
+                        "code": "invalid_tool_response",
+                    }
+                },
+                status=422,
+                headers={"x-should-retry": "false"},
+            )
+        if isinstance(exc, (UncertainSendError, SendReadinessError, TimeoutError)):
+            return web.json_response(
+                {
+                    "error": {
+                        "message": str(exc),
+                        "type": "invalid_request_error",
+                        "code": "send_outcome_uncertain",
+                    }
+                },
+                status=422,
+                headers={"x-should-retry": "false"},
+            )
         if isinstance(exc, RateLimitError):
             retry_after = str(int(exc.retry_after))
             return web.json_response(
@@ -449,7 +597,7 @@ class APIServer:
                     }
                 },
                 status=429,
-                headers={"Retry-After": retry_after},
+                headers={"Retry-After": retry_after, "x-should-retry": "false"},
             )
         if isinstance(exc, AuthExpiredError):
             return web.json_response(
@@ -474,6 +622,7 @@ class APIServer:
                     }
                 },
                 status=504,
+                headers={"x-should-retry": "false"},
             )
         if isinstance(exc, LockAcquisitionError):
             return web.json_response(
@@ -520,6 +669,203 @@ class APIServer:
 
     # ── Response formatters ───────────────────────────────────
 
+    async def _recover_agent_reply(self, bridge, expected_prompt, key, expected_conversation):
+        """Recover only an exact, completed pending exchange; never send here."""
+        from .turn_anchor import normalize_text
+
+        original_nonce = bridge.nonce
+        try:
+            info = self._agent_state.pending_frames.get(key)
+            expected_conversation = (info or {}).get("conversation") or expected_conversation
+            snapshot = await self._driver.read_agent_exchange()
+            if (
+                expected_conversation
+                and snapshot.get("conversation") != expected_conversation
+                and not snapshot.get("generating")
+            ):
+                # A service restart can create an empty owned tab. Reopen only
+                # the exact chat recorded for this pending request, once.
+                self._agent_state.check()
+                await self._driver.navigate_conversation(expected_conversation)
+                snapshot = await self._driver.read_agent_exchange()
+            if (
+                not snapshot.get("paired")
+                or snapshot.get("generating")
+                or snapshot.get("unsafe_markup")
+                or not snapshot.get("literal", True)
+                or not snapshot.get("conversation")
+            ):
+                return None
+            if info:
+                nonce = info["nonce"]
+                expected_hash = info["prompt_hash"]
+                expected_conversation = info.get("conversation") or expected_conversation
+            else:
+                # Backward-compatible recovery for a pending request recorded
+                # before nonce/hash metadata existed. Require the WHOLE prompt.
+                found = re.search(
+                    r'<web2api_response nonce="([a-f0-9]{32})">', snapshot.get("user", "")
+                )
+                if not found:
+                    return None
+                nonce = found.group(1)
+                expected_hash = digest(
+                    normalize_text(expected_prompt.replace(original_nonce, nonce))
+                )
+            if expected_conversation and snapshot["conversation"] != expected_conversation:
+                return None
+            if digest(normalize_text(snapshot.get("user", ""))) != expected_hash:
+                return None
+            bridge.nonce = nonce
+            message = bridge.parse(bridge.validated_frame(snapshot.get("assistant", "")))
+            logger.info(
+                "Recovered completed Agent response from existing conversation without sending: %s",
+                snapshot["conversation"],
+            )
+            return message, snapshot["conversation"]
+        except Exception as exc:
+            logger.warning(
+                "Pending Agent response not recoverable (%s); resubmission remains blocked",
+                type(exc).__name__,
+            )
+            return None
+        finally:
+            bridge.nonce = original_nonce
+
+    def _remember_agent_reply(self, key, messages, message, scope, conv_id):
+        self._agent_state.remember(messages, message, scope, conv_id)
+        self._agent_state.complete(key)
+        self._agent_state.replies[key] = (message, conv_id)
+        if len(self._agent_state.replies) > 64:
+            del self._agent_state.replies[next(iter(self._agent_state.replies))]
+
+    async def _agent_response(
+        self,
+        request: web.Request,
+        model: str,
+        text: str,
+        timeout: float,
+        bridge: ToolBridge,
+        stream: bool,
+        messages: list,
+        scope: str,
+        request_key: str,
+        image_paths: list[str] | None = None,
+    ) -> web.Response:
+        """Return validated calls/results with OpenAI-compatible SSE or JSON.
+
+        Generation and one optional format repair finish before headers are
+        committed, so protocol errors are genuine HTTP errors and no partial
+        function can execute. No filesystem or shell tool is executed here.
+        """
+        from .completion_detector import DetectorBudgets
+
+        budgets = DetectorBudgets.from_config(self._config.chatgpt, model)
+
+        async def collect(prompt: str, attachments=None) -> str:
+            async def send() -> str:
+                self._agent_state.begin(
+                    request_key,
+                    nonce=bridge.nonce,
+                    prompt=prompt,
+                    conversation=self._driver._current_conv_id,
+                )
+                self._agent_state.next_send = time.time() + self._agent_state.interval
+                self._agent_state.save()
+                parts = []
+                image_kwargs = {"image_paths": attachments} if attachments else {}
+                async for chunk in self._driver.send_and_stream(
+                    prompt,
+                    timeout=timeout,
+                    budgets=budgets,
+                    model=model,
+                    response_validator=bridge.validated_frame,
+                    response_marker=bridge.opening,
+                    **image_kwargs,
+                ):
+                    parts.append(chunk.delta)
+                return "".join(parts)
+
+            return await send()
+
+        self._agent_state.begin(request_key)
+        async with asyncio.timeout(timeout):
+            try:
+                answer = await collect(text, image_paths)
+                message = bridge.parse(answer)
+            except ToolProtocolError as exc:
+                logger.warning("Agent response requires format repair: %s", exc)
+                await self._agent_state.reserve()
+                answer = await collect(bridge.repair_prompt(exc))
+                message = bridge.parse(answer)
+
+        conv_id = self._driver._current_conv_id or ""
+        self._remember_agent_reply(request_key, messages, message, scope, conv_id)
+        return await self._render_agent_reply(request, model, message, conv_id, stream)
+
+    async def _render_agent_reply(self, request, model, message, conv_id, stream):
+        calls = message.get("tool_calls", [])
+        finish = "tool_calls" if calls else "stop"
+        self._last_conv_id = conv_id
+        self._last_successful_send_at = time.time()
+        self._last_error = None
+        logger.info(
+            "Agent response: finish=%s tools=%s", finish, [c["function"]["name"] for c in calls]
+        )
+        common = {
+            "id": f"chatcmpl-{uuid.uuid4().hex[:29]}",
+            "created": int(time.time()),
+            "model": model,
+        }
+        if not stream:
+            return web.json_response(
+                {
+                    **common,
+                    "object": "chat.completion",
+                    "conversation_id": conv_id,
+                    "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                }
+            )
+        response = web.StreamResponse(
+            headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache"}
+        )
+        await response.prepare(request)
+        # Continue 2.0.0's fromChatCompletionChunk chooses content OR tools
+        # with if/else-if. Combining both silently drops the tool call.
+        # Separate deltas preserve commentary and let the Agent loop continue.
+        deltas = []
+        if message["content"] is not None:
+            deltas.append({"role": "assistant", "content": message["content"]})
+        if calls:
+            deltas.append(
+                {
+                    "role": "assistant",
+                    "tool_calls": [{"index": index, **call} for index, call in enumerate(calls)],
+                }
+            )
+        for delta in deltas:
+            await self._send_sse(
+                response,
+                {
+                    **common,
+                    "object": "chat.completion.chunk",
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                },
+            )
+        await self._send_sse(
+            response,
+            {
+                **common,
+                "object": "chat.completion.chunk",
+                "conversation_id": conv_id,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
+            },
+        )
+        await response.write(b"data: [DONE]\n\n")
+        await response.write_eof()
+        return response
+
     async def _full_response(
         self, request: web.Request, model: str, text: str, timeout: float
     ) -> web.Response:
@@ -538,12 +884,15 @@ class APIServer:
         async def _send_and_collect() -> str:
             collected = ""
             async for chunk in self._driver.send_and_stream(
-                text, timeout=timeout, budgets=budgets, model=model,
+                text,
+                timeout=timeout,
+                budgets=budgets,
+                model=model,
             ):
                 collected += chunk.delta
             return collected
 
-        full_text = await retry_on_rate_limit(self._driver, _send_and_collect)
+        full_text = await _send_and_collect()
 
         conv_id = self._driver._current_conv_id or ""
         self._last_conv_id = conv_id
@@ -592,7 +941,7 @@ class APIServer:
             """Raise RateLimitError if the pop-up is present right now."""
             try:
                 scan = await self._driver._js_strict(
-                    "(function(){var t=(document.body&&document.body.innerText)||'';"
+                    "(function(){var t=Array.from(document.querySelectorAll('[role=dialog],[role=alert]')).map(e=>e.textContent||'').join('\\n');"
                     "return JSON.stringify({text:t.slice(0,4000)});})()",
                     timeout=10,
                 )
@@ -609,7 +958,7 @@ class APIServer:
         # Transparent pre-flight retry — dismisses the pop-up and retries so a
         # transient limit never reaches the client as an error.
         try:
-            await retry_on_rate_limit(self._driver, _preflight, max_attempts=3)
+            await _preflight()
         except RateLimitError:
             # Persistent at pre-flight: still pre-prepare, so send a clean 429.
             raise
@@ -649,7 +998,10 @@ class APIServer:
 
         try:
             async for chunk in self._driver.send_and_stream(
-                text, timeout=timeout, budgets=budgets, model=model,
+                text,
+                timeout=timeout,
+                budgets=budgets,
+                model=model,
             ):
                 if chunk.delta:
                     await self._send_sse(
@@ -687,6 +1039,7 @@ class APIServer:
                         },
                     )
         except RateLimitError as e:
+            self._agent_state.penalize(e.retry_after)
             # Mid-stream throttle (rare after pre-flight). Status is locked at
             # 200, so we can't upgrade to 429; surface as an inline error chunk
             # with a recognizable marker so clients can detect it.
