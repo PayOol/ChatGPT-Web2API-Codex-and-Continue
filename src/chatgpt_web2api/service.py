@@ -154,7 +154,7 @@ class Service:
         cfg = self._config
         self._check_bind_safety(cfg)  # fail-fast before binding
 
-        runner = web.AppRunner(self._server.app)
+        runner = web.AppRunner(self._server.app, handler_cancellation=True)
         await runner.setup()
 
         site = web.TCPSite(runner, cfg.server.host, cfg.server.port)

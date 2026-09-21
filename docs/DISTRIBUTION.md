@@ -4,7 +4,7 @@ Distribution privée regroupant ChatGPT-Web2API, les correctifs de notre intégr
 
 ## Installer
 
-1. Depuis [la dernière version](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/latest), télécharger **Web2API-Continue-Setup-0.3.0.exe**.
+1. Depuis [la dernière version](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/latest), télécharger **Web2API-Continue-Setup-0.3.1.exe**.
 2. Lancer ce fichier. Il télécharge les dépendances, installe l'éditeur et l'extension, applique tous les correctifs, écrit la configuration, crée les raccourcis et démarre l'environnement.
 3. À la première ouverture, se connecter à **son propre compte ChatGPT** dans le navigateur dédié, puis ouvrir son dossier de travail dans VS Code et choisir le mode Agent de Continue.
 
@@ -40,6 +40,16 @@ La conversation Agent passe par le navigateur ChatGPT connecté. Les comptes, co
 L'accès automatique des outils est activé comme dans l'environnement d'origine. `continue/full-access.local.json` permet de le désactiver (`enabled: false`). Les règles installées demandent de respecter les instructions de l'utilisateur, le dossier de travail et les autorisations des applications. Les commandes et le contrôle Windows ont les droits de l'utilisateur connecté.
 
 Chaque installation possède ses dossiers `continue`, `vscode-data`, `extensions`, `browser-profile`, `media`, `state`, `logs` et `backups`. Le VS Code habituel et sa configuration ne sont pas modifiés. Les ports libres sont choisis automatiquement au premier passage puis conservés ; les valeurs effectives figurent dans `installation.json`. L'API écoute sur `127.0.0.1`.
+
+## Réflexions longues de ChatGPT
+
+La version 0.3.1 attend la réponse complète **sans limite de durée de génération par défaut**, y compris avec le modèle `auto`, avant le premier texte et pendant les pauses. Les anciens plafonds de 90 secondes, 10 minutes et 15 minutes sont supprimés dans cette configuration. Le correctif Continue désactive également le minuteur du SDK pour ce modèle local. Il conserve le signal d'annulation et désactive les répétitions automatiques du SDK pour éviter un second envoi.
+
+Une interruption dans Continue ou la fermeture du client annule l'observation et libère le verrou de la passerelle. ChatGPT peut continuer à générer dans son navigateur : une réponse déjà envoyée reste marquée comme incertaine et peut être récupérée lorsqu'elle est terminée, sans renvoi automatique. Les erreurs de connexion au navigateur, de session, de quota et de format restent des erreurs ; une durée de réflexion sans texte n'en est plus une.
+
+Dans `config.json`, `request_timeout: 0` et les cinq paramètres `detector_*_timeout_seconds: 0` signifient « sans limite ». Une valeur positive réactive volontairement la limite correspondante en secondes. Le délai total éventuel couvre les deux phases d'attente sans repartir à zéro à l'apparition du message. Dans la configuration Continue installée, `requestOptions.timeout: 0` active l'attente sans minuteur du correctif local.
+
+Pour mettre à jour une installation 0.3.0, fermer son éditeur puis lancer l'installateur 0.3.1 sur le même dossier. Les configurations remplacées sont sauvegardées et les comptes/profils sont conservés. Si le correctif est appliqué à une extension déjà chargée, recharger sa fenêtre VS Code pour charger le nouveau code.
 
 ## Maintenance et développement
 

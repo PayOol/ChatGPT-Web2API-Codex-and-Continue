@@ -30,7 +30,7 @@ internal static class Bootstrap {
                     default: throw new ArgumentException("Option inconnue : " + args[i]);
                 }
             }
-            string folder = extract ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Web2API-Continue-Setup", "0.3.0-" + Guid.NewGuid().ToString("N"));
+            string folder = extract ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Web2API-Continue-Setup", "0.3.1-" + Guid.NewGuid().ToString("N"));
             if (Directory.Exists(folder)) throw new IOException("Le dossier d'extraction existe deja : " + folder);
             Directory.CreateDirectory(folder);
             using (Stream payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")) {

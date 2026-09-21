@@ -189,6 +189,7 @@ async def test_rest_post_lock_check_catches_race(monkeypatch):
     server._last_conv_id = None
     server._last_project_id = None
     server._request_count = 0
+    server._active_requests = 0
     server._cdp_port = 9222
     server._parallel_tabs = False  # PR4: mirror __init__'s cache for __new__ bypass
     server._config = srv.Config.load(None)
@@ -276,6 +277,7 @@ async def test_rest_auth_recovery_probes_then_proceeds(monkeypatch):
     server._last_conv_id = None
     server._last_project_id = None
     server._request_count = 0
+    server._active_requests = 0
     server._cdp_port = 9222
     server._parallel_tabs = False  # PR4: mirror __init__'s cache for __new__ bypass
     server._config = srv.Config.load(None)
@@ -363,6 +365,7 @@ async def test_rest_auth_recovery_fails_still_fail_fasts():
     server._last_conv_id = None
     server._last_project_id = None
     server._request_count = 0
+    server._active_requests = 0
     server._cdp_port = 9222
     server._parallel_tabs = False  # PR4: mirror __init__'s cache for __new__ bypass
     server._config = srv.Config.load(None)

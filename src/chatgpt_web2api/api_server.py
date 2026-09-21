@@ -16,6 +16,7 @@ import os
 import re
 import time
 import uuid
+from contextlib import suppress
 from pathlib import Path
 
 from aiohttp import web
@@ -67,6 +68,7 @@ class APIServer:
         self._cdp_port = config.chrome.cdp_port
         self._parallel_tabs = config.chatgpt.parallel_tabs
         self._request_count = 0
+        self._active_requests = 0
         # Health telemetry (event-derived, not polled). These are the only
         # fields that make sense to cache: they mark WHEN something happened,
         # not whether something is alive right now (that's computed live in
@@ -193,6 +195,8 @@ class APIServer:
                 "cdp_connected": driver_connected,
                 "driver_connected": driver_connected,
                 "requests_served": self._request_count,
+                "active_requests": self._active_requests,
+                "request_timeout_seconds": self._config.server.request_timeout,
                 "tool_calling": "text-bridge-v1",
                 "image_inputs": True,
                 "started_at": self._started_at,
@@ -247,6 +251,31 @@ class APIServer:
         return web.json_response({"object": "list", "data": projects})
 
     async def _handle_chat(self, request: web.Request) -> web.Response:
+        """Cancel observation when the caller disconnects, even before headers.
+
+        Agent frames stay buffered until validated, preserving genuine HTTP
+        errors and preventing partial tool execution. No generation deadline
+        is needed to release the browser lock when Continue cancels a request.
+        The pending nonce remains recoverable; cancellation never resends.
+        """
+        task = asyncio.create_task(self._handle_chat_response(request))
+        self._active_requests += 1
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=1.0)
+                if done:
+                    return task.result()
+                transport = request.transport
+                if transport is None or transport.is_closing():
+                    raise asyncio.CancelledError("Chat client disconnected")
+        finally:
+            if not task.done():
+                task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+            self._active_requests -= 1
+
+    async def _handle_chat_response(self, request: web.Request) -> web.Response:
         if err := self._check_auth(request):
             return err
 
@@ -789,7 +818,7 @@ class APIServer:
             return await send()
 
         self._agent_state.begin(request_key)
-        async with asyncio.timeout(timeout):
+        async with asyncio.timeout(timeout if timeout > 0 else None):
             try:
                 answer = await collect(text, image_paths)
                 message = bridge.parse(answer)

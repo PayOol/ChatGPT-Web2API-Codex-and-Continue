@@ -1,0 +1,7 @@
+[
+  {
+    "file": "out\\extension.js",
+    "before": "        this.openai = new OpenAI({\n          // Necessary because `new OpenAI()` will throw an error if there is no API Key\n          apiKey: config3.apiKey ?? \"\",\n          baseURL: this.apiBase,\n          fetch: customFetch(config3.requestOptions),\n          timeout: config3?.requestOptions?.timeout || void 0\n        });",
+    "after": "        this.openai = new OpenAI({\n          // Necessary because `new OpenAI()` will throw an error if there is no API Key\n          apiKey: config3.apiKey ?? \"\",\n          baseURL: this.apiBase,\n          fetch: customFetch(config3.requestOptions),\n          timeout: config3?.requestOptions?.timeout || void 0\n        });\n        require(\"./continue-long-wait.local.cjs\").configureLongWait(this.openai, config3);"
+  }
+]

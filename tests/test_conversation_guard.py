@@ -252,6 +252,7 @@ async def test_rest_unmatched_request_starts_isolated_chat(monkeypatch):
     server._last_conv_id = "conv-rest-1"
     server._last_project_id = None
     server._request_count = 0
+    server._active_requests = 0
     server._cdp_port = 9222
     server._parallel_tabs = False  # PR4: mirror __init__'s cache for __new__ bypass
     server._config = srv.Config.load(None)

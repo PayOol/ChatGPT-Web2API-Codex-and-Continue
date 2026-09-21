@@ -150,6 +150,8 @@ def classify_model(model: str | None) -> str:
 class DetectorBudgets:
     """Per-call detector timeout budgets, resolved from config + model class.
 
+    Zero disables each limit. Positive values opt into a bounded wait.
+
     - ``first_content_timeout_seconds``: how long to wait for the FIRST text
       content after the assistant node appears. Longer for reasoning models
       (they think silently before streaming).
@@ -357,16 +359,16 @@ class CompletionDetector:
         self.validated_dom_text = ""
         self.had_non_text_content = False
 
-        # Wait for a new assistant message. The full `timeout` governs (was
-        # capped at 60s, which killed slow-to-appear responses like image
-        # generation). A stall detector (PHASE_STALL_SECONDS) catches a true
-        # hang fast: if the assistant node count doesn't change at all — even
-        # 0→1 with empty text counts as progress — for longer than the stall
-        # window, we raise GenerationStuckError instead of waiting out the
-        # whole deadline. Slow-but-progressing generations (image render,
-        # deep-research thinking) keep resetting the stall clock and are
-        # allowed the full timeout.
-        deadline = time.monotonic() + timeout
+        # A silent DOM is normal during reasoning, including before the nonce
+        # appears in a virtualized conversation. Never infer a 90s generation
+        # failure when the caller configured an unlimited wait. One deadline
+        # covers both phases; it must not reset when the answer first appears.
+        observation_start = time.monotonic()
+        deadline = observation_start + timeout if timeout > 0 else float("inf")
+        if budgets and budgets.hard_timeout_seconds > 0:
+            deadline = min(deadline, observation_start + budgets.hard_timeout_seconds)
+        appear_budget = budgets.first_content_timeout_seconds if budgets else PHASE_STALL_SECONDS
+        last_observation = observation_start
         last_node_count = initial_count
         last_progress = time.monotonic()
         last_candidate = ""
@@ -397,7 +399,10 @@ class CompletionDetector:
                     "document.querySelectorAll('[data-message-author-role=\"assistant\"]').length"
                 )
                 current_count = int(raw or 0)
+                last_observation = time.monotonic()
             except CDPJSError:
+                if time.monotonic() - last_observation > PHASE_STALL_SECONDS:
+                    raise  # bounded failure to observe the browser, not silent reasoning
                 current_count = last_node_count  # no progress signal
             if current_count != last_node_count:
                 # Any node-count change is progress (incl. 0→1 with empty text,
@@ -430,11 +435,16 @@ class CompletionDetector:
                     break
             elif current_count > initial_count:
                 break
-            if time.monotonic() - last_progress > PHASE_STALL_SECONDS:
+            if appear_budget > 0 and time.monotonic() - last_progress > appear_budget:
                 raise GenerationStuckError("phase_1_appear", time.monotonic() - last_progress)
             await asyncio.sleep(0.5)
         else:
-            raise GenerationStuckError("phase_1_appear", timeout)
+            raise GenerationStuckError(
+                "phase_1_appear",
+                time.monotonic() - observation_start,
+                stall_kind="hard_timeout",
+                model_class=model_class,
+            )
 
         logger.info("Assistant message appeared, waiting for completion...")
 
@@ -485,7 +495,7 @@ class CompletionDetector:
         # captured from the message's innerText (which IS populated during
         # streaming) rather than .markdown textContent (which lags).
         last_change_time = time.monotonic()
-        deadline = time.monotonic() + timeout
+        last_observation = time.monotonic()
         # P1: two-state phase-2 machine. phase_2_start tracks total observation
         # time for the hard cap; first_content_seen tracks whether we've
         # transitioned from awaiting_first_content to streaming_after_first_content.
@@ -604,9 +614,14 @@ class CompletionDetector:
                     "})()",
                 )
                 data = json.loads(result)
+                if not isinstance(data, dict):
+                    raise TypeError("Completion observation must be an object")
             except (CDPJSError, json.JSONDecodeError, TypeError):
+                if time.monotonic() - last_observation > PHASE_STALL_SECONDS:
+                    raise
                 await asyncio.sleep(0.5)
                 continue
+            last_observation = time.monotonic()
 
             current = data.get("text", "")
             md_text = data.get("md_text", "")
@@ -876,8 +891,11 @@ class CompletionDetector:
                 )
 
                 # Hard cap: absolute wall-clock limit regardless of DOM signals.
-                hard_cap_hit = elapsed_total > budgets.hard_timeout_seconds
-                budget_hit = elapsed_since_progress > stall_budget
+                hard_cap_hit = (
+                    budgets.hard_timeout_seconds > 0
+                    and time.monotonic() - observation_start > budgets.hard_timeout_seconds
+                )
+                budget_hit = stall_budget > 0 and elapsed_since_progress > stall_budget
 
                 if hard_cap_hit or budget_hit:
                     # Final reconciliation: did the turn actually complete?
@@ -921,6 +939,17 @@ class CompletionDetector:
                     )
 
             await asyncio.sleep(0.5)
+        else:
+            # Never return a truncated/empty answer as successful on expiry.
+            if not await self._reconcile_before_stall(
+                d, conv_id_for_check, turn_anchor, had_non_text_content
+            ):
+                raise GenerationStuckError(
+                    "phase_2_stream",
+                    time.monotonic() - observation_start,
+                    stall_kind="hard_timeout",
+                    model_class=model_class,
+                )
 
         # Per-call results (last_dom_text / had_non_text_content) are already
         # mirrored to self.* as they changed during the loop; the driver tail

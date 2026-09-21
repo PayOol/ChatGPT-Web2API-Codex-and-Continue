@@ -55,6 +55,29 @@ def examine(root: Path, offline=False):
     config = yaml.safe_load((root / "continue/config.yaml").read_text(encoding="utf-8"))
     servers = config.get("mcpServers", [])
     check(
+        "Continue long generation wait",
+        any(
+            m.get("name") == "ChatGPT Web2API" and m.get("requestOptions", {}).get("timeout") == 0
+            for m in config.get("models", [])
+        ),
+    )
+    check(
+        "Continue long wait helper",
+        (Path(manifest["extension"]) / "out/continue-long-wait.local.cjs").is_file(),
+    )
+    from chatgpt_web2api.config import Config
+    from chatgpt_web2api.completion_detector import DetectorBudgets
+
+    bridge_config = Config.load(str(root / "config.json"))
+    check(
+        "Bridge long generation wait",
+        bridge_config.server.request_timeout == 0
+        and all(
+            DetectorBudgets.from_config(bridge_config.chatgpt, model) == DetectorBudgets(0, 0, 0)
+            for model in ("auto", "gpt-5-5-thinking")
+        ),
+    )
+    check(
         "Five MCP servers configured",
         {"Local", "Browser", "Computer", "Vision", "Connected"}.issubset(
             {s["name"] for s in servers}

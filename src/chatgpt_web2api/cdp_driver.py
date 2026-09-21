@@ -1735,7 +1735,7 @@ class CDPDriver:
     async def send_and_stream(
         self,
         text: str,
-        timeout: float = 120,
+        timeout: float = 0,
         *,
         budgets=None,
         model: str | None = None,
@@ -1860,9 +1860,12 @@ class CDPDriver:
             turn_anchor = fallback_anchor.with_captured_id(captured_uuid)
 
             # A2 Step 8: stream + completion with the anchored turn.
-            # P1: pass budgets + model for the model-aware two-state phase-2
-            # machine. When None (no config available), the detector uses the
-            # legacy single PHASE_STALL_SECONDS behavior.
+            # Direct callers also wait without a generation deadline by default.
+            if budgets is None:
+                from .completion_detector import DetectorBudgets
+                from .config import ChatGPTConfig
+
+                budgets = DetectorBudgets.from_config(ChatGPTConfig(), model)
             async for chunk in self._completion.stream_until_complete(
                 initial_count=initial_count,
                 timeout=timeout,

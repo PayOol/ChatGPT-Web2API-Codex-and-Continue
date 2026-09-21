@@ -788,7 +788,8 @@ async def do_chat_completion(
         else None
     )
     async for chunk in driver.send_and_stream(
-        full_text, timeout=120, budgets=_budgets, model=validated.model,
+        full_text, timeout=config.server.request_timeout if config else 0,
+        budgets=_budgets, model=validated.model,
     ):
         if chunk.delta:
             full_response += chunk.delta
@@ -1025,7 +1026,7 @@ async def do_chat_with_gpt(
     full_response = ""
     conv_id = ""
     chunk_count = 0
-    async for chunk in driver.send_and_stream(validated.message, timeout=120):
+    async for chunk in driver.send_and_stream(validated.message, timeout=0):
         if chunk.delta:
             full_response += chunk.delta
             chunk_count += 1

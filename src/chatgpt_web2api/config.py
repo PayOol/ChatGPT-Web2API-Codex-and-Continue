@@ -63,7 +63,9 @@ class ServerConfig:
     port: int = 8080
     host: str = "127.0.0.1"
     api_keys: list[str] = field(default_factory=list)
-    request_timeout: int = 120
+    # Generation may take hours. Zero disables the generation deadline;
+    # transport/connect timeouts remain bounded separately.
+    request_timeout: int = 0
 
 
 @dataclass
@@ -97,18 +99,13 @@ class ChatGPTConfig:
     # Account-level throttle breaker: pauses mutations pool-wide if ChatGPT
     # signals excessive consumption from simultaneous multi-tab use.
     mcp_account_throttle_cooldown_seconds: int = 300
-    # P1: model-aware detector budgets. Phase-2 stall detection splits into
-    # first-content-wait (no text yet) vs stream-idle (text appeared then
-    # stopped), with model-aware budgets. See classify_model /
-    # DetectorBudgets in completion_detector.py. Defaults reproduce the
-    # legacy 90s behavior for non-reasoning models and give reasoning models
-    # a longer first-content window (300s) so their silent thinking phase
-    # isn't falsely aborted.
-    detector_reasoning_first_content_timeout_seconds: float = 300
-    detector_reasoning_stream_idle_timeout_seconds: float = 120
-    detector_default_first_content_timeout_seconds: float = 90
-    detector_default_stream_idle_timeout_seconds: float = 90
-    detector_hard_timeout_seconds: float = 900
+    # Zero means unlimited, including model=auto (which may select reasoning).
+    # Positive values opt into inactivity/total generation limits in seconds.
+    detector_reasoning_first_content_timeout_seconds: float = 0
+    detector_reasoning_stream_idle_timeout_seconds: float = 0
+    detector_default_first_content_timeout_seconds: float = 0
+    detector_default_stream_idle_timeout_seconds: float = 0
+    detector_hard_timeout_seconds: float = 0
 
 
 @dataclass

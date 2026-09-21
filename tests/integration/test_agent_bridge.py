@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import re
@@ -310,6 +311,60 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_events[0]["choices"][0]["delta"]["tool_calls"][0]["index"], 0)
         self.assertEqual(events[-1]["choices"][0]["finish_reason"], "tool_calls")
         self.assertTrue(data.endswith("data: [DONE]\n\n"))
+
+    async def test_unlimited_request_waits_and_delivers_only_validated_frame(self):
+        original = self.driver.send_and_stream
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def delayed(text, **kwargs):
+            self.assertEqual(kwargs["timeout"], 0)
+            entered.set()
+            await release.wait()
+            async for chunk in original(text, **kwargs):
+                yield chunk
+
+        self.driver.send_and_stream = delayed
+        self.driver.answers = [{"content": "Finished after waiting", "tool_calls": []}]
+        request = asyncio.create_task(
+            self.client.post("/v1/chat/completions", json=body(stream=True))
+        )
+        await asyncio.wait_for(entered.wait(), 2)
+        await asyncio.sleep(0.03)
+        self.assertFalse(request.done())
+        release.set()
+        response = await asyncio.wait_for(request, 2)
+        self.assertEqual(response.status, 200)
+        self.assertIn("Finished after waiting", await response.text())
+
+    async def test_disconnect_cancels_observation_and_duplicate_request_does_not_resend(self):
+        entered, cancelled = asyncio.Event(), asyncio.Event()
+
+        async def waiting(text, **kwargs):
+            self.driver.prompts.append(text)
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+            yield  # async generator interface
+
+        self.driver.send_and_stream = waiting
+        request = asyncio.create_task(
+            self.client.post("/v1/chat/completions", json=body(stream=True))
+        )
+        await asyncio.wait_for(entered.wait(), 2)
+        request.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await request
+        await asyncio.wait_for(cancelled.wait(), 3)
+        for _ in range(20):
+            if self.api._active_requests == 0:
+                break
+            await asyncio.sleep(0.01)
+        self.assertEqual(self.api._active_requests, 0)
+        response = await self.client.post("/v1/chat/completions", json=body(stream=True))
+        self.assertEqual(response.status, 422)
+        self.assertEqual(len(self.driver.prompts), 1)
 
     async def test_stream_invalid_calls_never_emitted(self):
         self.driver.answers = ["invalid", "invalid again"]

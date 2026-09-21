@@ -75,6 +75,11 @@ async def test_image_response_does_not_stall(monkeypatch):
     # breaks to the placeholder path (last_dom_text empty + had_non_text_content).
     d._fetch_text_for_turn = AsyncMock(return_value=TurnTextResult(status="non_text"))
 
+    async def image_complete(*args, **kwargs):
+        return TurnEndResult(status="matched" if state["phase2_polls"] > 100 else "not_ready")
+
+    d._fetch_end_turn_for_turn = image_complete
+
     chunks = []
     async for chunk in d.send_and_stream("generate an image", timeout=10000):
         chunks.append(chunk)
@@ -129,11 +134,15 @@ async def test_text_response_streams_delta_unchanged(monkeypatch):
     d._js_strict = _fake_js
     d.type_message = AsyncMock()
     d.click_send = AsyncMock()
-    # A2: _fake_js has no location.href handler → conv_id never resolves →
-    # reconciliation skipped. Mapped to not_ready (faithful to old "").
+    # Both DOM and backend must identify an actually completed current turn.
     d._fetch_text_for_turn = AsyncMock(
         return_value=TurnTextResult(status="matched", text="Hello world. exact backend text")
     )
+
+    async def text_complete(*args, **kwargs):
+        return TurnEndResult(status="matched" if state["phase2"] > 5 else "not_ready")
+
+    d._fetch_end_turn_for_turn = text_complete
 
     chunks = []
     async for chunk in d.send_and_stream("hello", timeout=10000):

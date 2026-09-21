@@ -514,11 +514,14 @@ async def test_phase2_end_turn_fallback_skipped_when_no_text(monkeypatch):
 
     d._fetch_end_turn_for_turn = _counting_end_turn
 
-    with pytest.raises(GenerationStuckError):
+    from chatgpt_web2api.turn_anchor import TurnReconciliationError
+
+    with pytest.raises(TurnReconciliationError):
         async for _ in d.send_and_stream("hi", timeout=10000):
             pass
-    # Fallback was NEVER consulted because last_dom_text stayed empty.
-    assert end_turn_calls["n"] == 0
+    # No regular polling on an empty answer. The explicit total deadline
+    # performs one final reconciliation; missing answer text still fails.
+    assert end_turn_calls["n"] == 1
 
 
 @pytest.mark.asyncio

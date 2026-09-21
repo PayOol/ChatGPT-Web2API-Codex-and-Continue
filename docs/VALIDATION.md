@@ -1,4 +1,19 @@
-# Validation de la distribution 0.3.0
+# Validation de la distribution 0.3.1
+
+## Correctif des réflexions longues — 21 septembre 2026
+
+- Régressions avec horloge simulée : réponse après huit heures, six heures avant l'apparition du marqueur, attente silencieuse avant le premier contenu et pause après un contenu partiel. Le nombre de messages DOM reste constant, comme dans une conversation virtualisée.
+- Délais positifs explicites toujours respectés, avec une seule échéance pour les deux phases. Une échéance dépassée ne renvoie plus une réponse partielle comme si elle était terminée.
+- Erreur de quota immédiate et erreur persistante d'observation du navigateur toujours détectées.
+- Test HTTP de l'API : attente sans échéance, validation avant transmission, annulation du client, libération de l'attente et refus d'un renvoi identique incertain.
+- Test Node du code réellement inséré dans le constructeur de l'adaptateur Continue : une réponse HTTP après 80 ms survit à un ancien budget SDK de 1 ms ; annulation avant les en-têtes et pendant le corps ; autres fournisseurs conservés ; aucune répétition automatique.
+- Mise à jour effective de l'installation gérée 0.3.0 vers 0.3.1, avec sauvegardes, contrôle Doctor et démarrage des cinq catalogues MCP. Les bundles installés passent encore les 264 contrôles d'accès sur 86 outils et les 31 contrôles de compaction.
+- Passerelle habituelle mise à jour et redémarrée hors requête active. `/health` confirme `request_timeout_seconds: 0` et la connexion au navigateur.
+- Requête réelle au compte ChatGPT : réponse structurée `ATTENTE_OK`, HTTP 200, terminaison SSE reçue, aucun appel d'outil, durée 16,82 secondes. Les attentes de plusieurs heures sont validées par simulation ; cette requête réelle ne constitue pas un essai de plusieurs heures.
+
+Les tests de fixtures historiques qui créaient le serveur sans son constructeur ont été complétés avec le compteur des requêtes actives. Deux simulations de réponse ont aussi été corrigées pour fournir un véritable signal de fin côté backend : elles reposaient auparavant sur un retour silencieux à expiration.
+
+## Socle de validation 0.3.0
 
 La distribution a été construite et vérifiée sous Windows x64 le 21 septembre 2026, à partir du commit amont `497527dceabfa3f95961e23c291e618c5570f1ac` et de l'environnement local amélioré. Les 32 modules Python de l'installation de référence ont été comparés : 18 identiques, 8 modifiés et 6 ajoutés, auxquels s'ajoute ici le registre d'images partagé rendu portable.
 

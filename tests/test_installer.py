@@ -21,7 +21,11 @@ def extension_fixture(root):
     extension.mkdir(parents=True)
     (extension / "package.json").write_text('{"version":"2.0.0"}')
     targets = {}
-    for name in ["continue-full-access-changes.json", "continue-auto-compaction-changes.json"]:
+    for name in [
+        "continue-full-access-changes.json",
+        "continue-auto-compaction-changes.json",
+        "continue-long-wait-changes.json",
+    ]:
         for change in json.loads((SOURCE / "integration/continue" / name).read_text()):
             targets.setdefault(change["file"], []).append(change["before"])
     for name, chunks in targets.items():
@@ -72,7 +76,7 @@ def test_repair_preserves_ports_user_models_and_external_profile(tmp_path, monke
     assert first["cdp_port"] == second["cdp_port"]
     config = yaml.safe_load(path.read_text())
     assert len(config["models"]) == 2
-    assert config["models"][0]["requestOptions"]["timeout"] == 660
+    assert config["models"][0]["requestOptions"]["timeout"] == 0
     assert len(config["mcpServers"]) == 5
     assert (external / "config.yaml").read_text() == "personal marker"
     assert (root / "BIENVENUE.md").is_file()
@@ -81,6 +85,12 @@ def test_repair_preserves_ports_user_models_and_external_profile(tmp_path, monke
 
     actual = Config.load(str(root / "config.json"))
     assert actual.server.port == first["api_port"]
+    assert actual.server.request_timeout == 0
+    assert actual.chatgpt.detector_hard_timeout_seconds == 0
+    assert actual.chatgpt.detector_default_first_content_timeout_seconds == 0
+    assert actual.server.request_timeout == 0
+    assert actual.chatgpt.detector_hard_timeout_seconds == 0
+    assert actual.chatgpt.detector_default_first_content_timeout_seconds == 0
     assert actual.chrome.user_data_dir == str(root / "browser-profile")
 
 

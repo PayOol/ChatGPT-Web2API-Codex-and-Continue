@@ -11,7 +11,7 @@ import socket
 import sqlite3
 import time
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 
 def write_changed(path: Path, data: bytes, backup: Path):
@@ -58,7 +58,11 @@ def apply_continue_patches(extension: Path, source: Path, backup: Path):
     if read_json(extension / "package.json").get("version") != "2.0.0":
         raise RuntimeError("This release requires the pinned Continue 2.0.0 extension.")
     changes = []
-    for name in ["continue-full-access-changes.json", "continue-auto-compaction-changes.json"]:
+    for name in [
+        "continue-full-access-changes.json",
+        "continue-auto-compaction-changes.json",
+        "continue-long-wait-changes.json",
+    ]:
         changes.extend(read_json(source / "integration/continue" / name))
     texts = {}
     for change in changes:
@@ -75,7 +79,11 @@ def apply_continue_patches(extension: Path, source: Path, backup: Path):
     # Validate every replacement before writing any bundle.
     for path, text in texts.items():
         write_changed(path, text.encode("utf-8"), backup)
-    for name in ["continue-full-access.local.cjs", "continue-auto-compaction.local.cjs"]:
+    for name in [
+        "continue-full-access.local.cjs",
+        "continue-auto-compaction.local.cjs",
+        "continue-long-wait.local.cjs",
+    ]:
         write_changed(
             extension / "out" / name, (source / "integration/continue" / name).read_bytes(), backup
         )
@@ -156,7 +164,7 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
         "useLegacyCompletionsEndpoint": False,
         "capabilities": ["tool_use", "image_input"],
         "roles": ["chat", "edit", "apply"],
-        "requestOptions": {"timeout": 660},
+        "requestOptions": {"timeout": 0},
     }
     config["models"] = [model] + [
         m for m in config.get("models", []) if m.get("name") != model["name"]
@@ -257,7 +265,12 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
         default_model="auto",
         tab_mode="owned",
         parallel_tabs=False,
-        request_timeout=600,
+        request_timeout=0,
+        detector_reasoning_first_content_timeout_seconds=0,
+        detector_reasoning_stream_idle_timeout_seconds=0,
+        detector_default_first_content_timeout_seconds=0,
+        detector_default_stream_idle_timeout_seconds=0,
+        detector_hard_timeout_seconds=0,
         log_level="INFO",
         log_file=str(root / "logs/server.log"),
     )
