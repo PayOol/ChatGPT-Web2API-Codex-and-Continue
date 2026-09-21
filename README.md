@@ -1,14 +1,22 @@
-# ChatGPT Web2API + Continue — installation Windows en un lancement
+# ChatGPT Web2API — installation pour Codex ou Continue
 
-Distribution privée regroupant ChatGPT-Web2API, les correctifs de notre intégration Continue et les outils locaux, navigateur, Windows, vision et services connectés. Le code amont et sa licence MIT sont conservés ; le projet d'origine est [Octo-Lex/ChatGPT-Web2API](https://github.com/Octo-Lex/ChatGPT-Web2API), base `497527dceabfa3f95961e23c291e618c5570f1ac`.
+Distribution privée **0.4.0** proposant deux cibles : **Codex**, avec ses outils et permissions natifs, ou **Continue dans VS Code**, avec ses correctifs et serveurs d’outils dédiés. Les deux utilisent la passerelle ChatGPT-Web2API. Le code amont et sa licence MIT sont conservés ; le projet d'origine est [Octo-Lex/ChatGPT-Web2API](https://github.com/Octo-Lex/ChatGPT-Web2API), base `497527dceabfa3f95961e23c291e618c5570f1ac`.
 
 ## Installer
 
-1. Depuis [la dernière version](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/latest), télécharger **Web2API-Continue-Setup-0.3.4.exe**.
-2. Enregistrer ses fichiers, fermer VS Code s’il est ouvert, puis lancer ce fichier. Il télécharge les dépendances, réutilise le VS Code habituel (ou installe VS Code normalement s’il est absent), installe l’extension, applique tous les correctifs, écrit la configuration, crée les raccourcis et démarre l'environnement.
-3. À la première ouverture, se connecter à **son propre compte ChatGPT** dans le navigateur dédié, puis ouvrir son dossier de travail dans VS Code et choisir le mode Agent de Continue.
+1. Depuis [la version 0.4.0](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/tag/v0.4.0), télécharger **Web2API-Continue-Setup-0.4.0.exe**.
+2. Lancer l’EXE et choisir **1 — Codex** ou **2 — Continue**. L’installation affiche chaque étape, les téléchargements et les journaux des sous-processus.
+3. Pour **Codex**, l’installateur ajoute le modèle **ChatGPT Web2API** au catalogue. Codex garde ses outils natifs et leurs permissions. Un service OpenCodex existant est réutilisé après vérification de son identité ; si aucun état OpenCodex n’existe, une instance locale gérée est préparée dans le dossier de cette installation. Un état existant invalide ou un service arrêté ne sont pas remplacés automatiquement. L’application Codex est réutilisée ou installée par le Microsoft Store officiel.
+4. Pour **Continue**, enregistrer ses fichiers et fermer VS Code avant l’installation. L’installateur réutilise le VS Code habituel (ou l’installe normalement), installe Continue et configure les outils décrits ci-dessous.
+5. Se connecter à **son propre compte ChatGPT** dans le navigateur dédié. Dans Codex, rouvrir l’application si son catalogue était déjà chargé, puis sélectionner **ChatGPT Web2API** pour une nouvelle conversation. Dans Continue, choisir le modèle et le mode Agent.
 
-Windows x64 et une connexion Internet sont nécessaires. L'installation se fait dans `%LOCALAPPDATA%\Programs\Web2API-Continue`, sans installation globale de Python ou Node et sans droits administrateur. Prévoir plusieurs Go libres, notamment pour les téléchargements et les sauvegardes. Ce lancement automatise la préparation technique ; les connexions personnelles, les éventuels CAPTCHA et les autorisations Windows restent interactifs. L'exécutable n'est pas signé avec un certificat commercial ; Windows peut donc afficher un avertissement de provenance.
+**Dossiers séparés.** Le choix Codex utilise `%LOCALAPPDATA%\Programs\Web2API-Codex` ; le choix Continue utilise `%LOCALAPPDATA%\Programs\Web2API-Continue`. Une installation ne transforme pas le dossier de l’autre. Pour installer les deux cibles, lancer l’EXE une seconde fois et choisir l’autre dossier. Une entrée `chatgpt-web2api` déjà possédée par une autre installation OpenCodex provoque un conflit explicite ; elle n’est pas réaffectée automatiquement. L’ajout Codex à une passerelle Continue existante peut aussi réutiliser sa racine et son port, sans nouveau navigateur ni nouvelle connexion ChatGPT ; cette opération ne convertit pas sa cible de maintenance.
+
+**Intégration Codex.** Aucun outil Codex, réglage de permission, fichier de l’application ou paquet global n’est remplacé. Le modèle transmet les demandes et résultats d’outils par l’adaptateur OpenCodex. Les autres fournisseurs et le modèle sélectionné restent en place. Dans le cas d’un OpenCodex géré neuf, `configure_codex.py` initialise son état sous `opencodex/`, désactive l’injection automatique et synchronise le catalogue. Il ajoute ensuite uniquement `openai_base_url` et `model_catalog_json` au TOML Codex, avec un journal de propriété ; des clés déjà présentes sont préservées et leur remplacement est refusé. La branche Codex n’installe ni les cinq serveurs MCP de Continue, ni un ensemble universel de connecteurs. Les mises à jour de Codex restent gérées par Codex ; la compatibilité protocolaire avec de futures versions doit être revalidée. [Détails et retrait de l’intégration](docs/codex-integration.md).
+
+Pendant une longue attente, les messages marqués **Passerelle ChatGPT Web2API** indiquent que la connexion est active. Ce sont des états de transport, pas des extraits de réflexion du modèle. La passerelle conserve l’attente illimitée et la prise en charge de l’annulation.
+
+Windows x64 et une connexion Internet sont nécessaires. Les composants sont installés dans le dossier de la cible choisie, sans installation globale de Python ou Node. L’installation de Codex via le Store peut demander une interaction ou une autorisation Windows. Prévoir plusieurs Go libres, notamment pour les téléchargements et les sauvegardes. Ce lancement automatise la préparation technique ; les connexions personnelles, les éventuels CAPTCHA et les autorisations Windows restent interactifs. L'exécutable n'est pas signé avec un certificat commercial ; Windows peut donc afficher un avertissement de provenance.
 
 Le dépôt et ses versions sont privés. Le propriétaire doit donner accès aux personnes autorisées, ou leur transmettre l'installateur. Une fois le fichier reçu, aucun identifiant GitHub n'est nécessaire pour installer : ses dépendances viennent de leurs sources publiques officielles.
 
@@ -16,15 +24,24 @@ Alternative avec le code source : extraire l'archive puis lancer `Install.cmd`. 
 
 ## Progression de l'installation
 
-Depuis la version 0.3.2, l’installateur affiche 21 étapes numérotées et horodatées : préparation, composants, Python, bibliothèques, outils, navigateur, Continue, correctifs, diagnostic, raccourcis et lancement. Chaque étape réussie indique sa durée. Le pourcentage global compte les étapes terminées ; il ne prédit pas la durée totale.
+En version 0.4.0, l’installateur affiche des étapes numérotées et horodatées adaptées à la cible : **17 pour Codex**, **21 pour Continue**. Elles couvrent la préparation, les dépendances, le navigateur, l’intégration du client choisi, le diagnostic, les raccourcis et le lancement. Chaque étape réussie indique sa durée. Le pourcentage global compte les étapes terminées ; il ne prédit pas la durée totale.
 
 Pour les archives téléchargées directement, l'installateur affiche la taille reçue, le débit moyen et, lorsque le serveur annonce une taille totale, le pourcentage et le temps restant estimé. Une taille inconnue est indiquée explicitement. La vérification SHA-256, l'extraction, la copie, la réutilisation du cache et les nouvelles tentatives sont visibles.
 
 Les commandes Python, npm, Playwright et VS Code transmettent leurs sorties au fil de l'exécution. Une commande sans nouvelle sortie produit un message « EN COURS » toutes les cinq secondes ; ce message indique qu'elle est encore en attente, sans prétendre mesurer son avancement interne. Les téléchargements réalisés par ces outils conservent le détail qu'ils fournissent.
 
-Le journal complet est écrit dans `%LOCALAPPDATA%\Programs\Web2API-Continue\logs\install.log` (ou `logs\install.log` dans le dossier choisi). Une erreur indique l'étape concernée et le chemin du journal. Relancer l'installateur reprend en réutilisant les composants et archives déjà vérifiés.
+Le journal complet est écrit dans `logs/install.log` sous la racine choisie : `Web2API-Codex` ou `Web2API-Continue` par défaut. Une erreur indique l'étape concernée et le chemin du journal. Relancer l'installateur reprend en réutilisant les composants et archives déjà vérifiés.
 
 ## Ce qui est installé et configuré
+
+| Cible | Client et outils | Configuration propre |
+| --- | --- | --- |
+| Codex | Application Codex, outils natifs et permissions existantes ; passerelle, runtime Codex, OpenCodex et Chromium locaux | Modèle ChatGPT Web2API ; état OpenCodex existant réutilisé ou instance gérée sous la racine Codex ; aucune configuration MCP Continue |
+| Continue | VS Code habituel, Continue 2.0.0 corrigé et serveurs MCP décrits ci-dessous | Profil normal de VS Code et entrées Web2API dans la configuration Continue |
+
+### Cible Continue uniquement : composants et outils
+
+Les correctifs, serveurs, nombres d’outils et services du tableau suivant concernent **Continue**. Ils ne sont pas ajoutés à Codex par le choix Codex.
 
 | Élément | Contenu |
 |---|---|
@@ -41,9 +58,9 @@ Le journal complet est écrit dans `%LOCALAPPDATA%\Programs\Web2API-Continue\log
 
 Les 67 outils MCP directs complètent les outils natifs de Continue. Le catalogue connecté de la machine initiale comptait 651 fonctions ; ce nombre dépend des applications, comptes et droits de chaque utilisateur. Il ne constitue pas une garantie de disponibilité ni d'authentification sur un autre compte.
 
-## Connexions et utilisation
+## Connexions et utilisation de Continue
 
-La conversation Agent passe par le navigateur ChatGPT connecté. Les comptes, cookies, jetons, profils, historiques et fichiers de travail du propriétaire ne sont jamais inclus dans la distribution.
+Dans les deux cibles, les demandes au modèle passent par le navigateur ChatGPT connecté. Les paragraphes suivants décrivent les outils et profils de **Continue uniquement**. Les comptes, cookies, jetons, profils, historiques et fichiers de travail du propriétaire ne sont jamais inclus dans la distribution.
 
 `Connect-Codex.cmd`, dans le dossier d'installation, ouvre la connexion du runtime Codex. Si Codex est déjà connecté sur le PC, la passerelle réutilise sa configuration et son authentification locales. Les apps doivent être connectées au compte concerné. Le serveur Hostinger fourni utilise son propre parcours OAuth lorsque nécessaire ; une configuration Hostinger existante est conservée. Les fonctions de génération explicites de Codex consomment son quota ; la recherche et l'appel direct aux outils n'invoquent pas un second modèle.
 
@@ -51,9 +68,9 @@ L'accès automatique des outils est activé comme dans l'environnement d'origine
 
 La passerelle possède ses dossiers `browser-profile`, `media`, `state`, `logs` et `backups`. VS Code utilise son profil normal `%APPDATA%/Code`, ses extensions `%USERPROFILE%/.vscode/extensions` et Continue sa configuration `%USERPROFILE%/.continue/config.yaml`. Les réglages de l’éditeur, les autres extensions, les autres modèles et les serveurs d’outils non remplacés sont conservés. Les fichiers remplacés sont sauvegardés. Les ports libres sont choisis automatiquement au premier passage puis conservés ; les valeurs effectives figurent dans `installation.json`. L'API écoute sur `127.0.0.1`.
 
-## Profil normal de VS Code
+## Continue uniquement : profil normal de VS Code
 
-La version 0.3.4 utilise **le VS Code habituel et son profil normal**. Le raccourci Web2API démarre la passerelle puis ouvre cet éditeur, avec ses réglages et ses extensions. Un lancement de VS Code depuis son icône habituelle retrouve aussi le modèle : Continue charge son environnement à partir d’une liaison locale vérifiée, sans dépendre du raccourci.
+La branche Continue de la version 0.4.0 conserve **le VS Code habituel et son profil normal**, comme depuis 0.3.4. Le raccourci Web2API démarre la passerelle puis ouvre cet éditeur, avec ses réglages et ses extensions. Un lancement de VS Code depuis son icône habituelle retrouve aussi le modèle : Continue charge son environnement à partir d’une liaison locale vérifiée, sans dépendre du raccourci.
 
 Continue 2.0.0 reçoit automatiquement les correctifs, et **ChatGPT Web2API** est sélectionné pour chat, modification et application. Aucune installation manuelle de Continue ni connexion GitHub n’est nécessaire pour utiliser ce modèle local. Il faut connecter son compte ChatGPT dans le navigateur dédié.
 
@@ -63,28 +80,35 @@ Lors d’une mise à jour depuis 0.3.3, l’ancien profil portable est archivé 
 
 ## Réflexions longues de ChatGPT
 
-La version 0.3.1 attend la réponse complète **sans limite de durée de génération par défaut**, y compris avec le modèle `auto`, avant le premier texte et pendant les pauses. Les anciens plafonds de 90 secondes, 10 minutes et 15 minutes sont supprimés dans cette configuration. Le correctif Continue désactive également le minuteur du SDK pour ce modèle local. Il conserve le signal d'annulation et désactive les répétitions automatiques du SDK pour éviter un second envoi.
+La configuration de passerelle attend la réponse complète **sans limite de durée de génération par défaut**, y compris avec le modèle `auto`, avant le premier texte et pendant les pauses. Les anciens plafonds de 90 secondes, 10 minutes et 15 minutes sont supprimés dans cette configuration. Le correctif Continue désactive également le minuteur du SDK pour ce modèle local. Il conserve le signal d'annulation et désactive les répétitions automatiques du SDK pour éviter un second envoi.
 
-Une interruption dans Continue ou la fermeture du client annule l'observation et libère le verrou de la passerelle. ChatGPT peut continuer à générer dans son navigateur : une réponse déjà envoyée reste marquée comme incertaine et peut être récupérée lorsqu'elle est terminée, sans renvoi automatique. Les erreurs de connexion au navigateur, de session, de quota et de format restent des erreurs ; une durée de réflexion sans texte n'en est plus une.
+Une annulation reçue du client annule l'observation et libère le verrou de la passerelle. ChatGPT peut continuer à générer dans son navigateur : une réponse déjà envoyée reste marquée comme incertaine et peut être récupérée lorsqu'elle est terminée, sans renvoi automatique. Les erreurs de connexion au navigateur, de session, de quota et de format restent des erreurs ; une durée de réflexion sans texte n'en est plus une.
 
 Dans `config.json`, `request_timeout: 0` et les cinq paramètres `detector_*_timeout_seconds: 0` signifient « sans limite ». Une valeur positive réactive volontairement la limite correspondante en secondes. Le délai total éventuel couvre les deux phases d'attente sans repartir à zéro à l'apparition du message. Dans la configuration Continue installée, `requestOptions.timeout: 0` active l'attente sans minuteur du correctif local.
 
-Pour mettre à jour une version précédente, enregistrer ses fichiers, fermer toutes les fenêtres VS Code puis lancer l’installateur 0.3.4 sur le même dossier. Les configurations remplacées sont sauvegardées et le navigateur ChatGPT conserve son compte connecté.
+Pour mettre à jour une version précédente, lancer l’installateur **0.4.0** avec la même cible et le même dossier. Pour Continue, enregistrer ses fichiers et fermer toutes les fenêtres VS Code avant l’opération. Les configurations remplacées sont sauvegardées et le navigateur ChatGPT conserve son compte connecté.
 
 ## Maintenance et développement
 
-- `Start.cmd` ouvre l'environnement ; `Stop.ps1` arrête uniquement la passerelle correspondant à ce dossier.
-- `Doctor.cmd` contrôle les fichiers, correctifs, réglages et les cinq catalogues MCP. Une présence au catalogue n'est pas une preuve de réussite d'une action distante.
-- `Repair.cmd` réinstalle les composants et réapplique la configuration. Fermer le VS Code de cette installation avant réparation. Les fichiers modifiés remplacés sont sauvegardés sous `backups`.
-- `Uninstall.cmd` retire les composants et raccourcis, après fermeture de l'éditeur, tout en conservant les profils, historiques, configurations, médias, journaux et sauvegardes.
-- La mise à jour automatique de Continue est désactivée : une nouvelle version de la distribution doit valider et adapter les correctifs.
+Exécuter les commandes depuis **le dossier de la cible à entretenir**. `installation.json` conserve ce choix ; `Repair.cmd` ne transforme pas une cible en l’autre.
+
+| Commande | Cible Codex | Cible Continue |
+| --- | --- | --- |
+| `Start.cmd` | Lance la passerelle de cette racine et ouvre Codex ; démarre l’OpenCodex géré si nécessaire | Lance la passerelle et ouvre le VS Code habituel |
+| `Doctor.cmd` | Vérifie le manifeste, les fichiers et la présence de Codex Desktop ; contrôle la santé de la passerelle et l’identité OpenCodex hors mode `-Offline` | Vérifie les fichiers, correctifs, réglages et les cinq catalogues MCP |
+| `Repair.cmd` | Reprend l’installation Codex dans la même racine et les entrées dont elle conserve la propriété | Réinstalle les composants et réapplique les correctifs ; fermer VS Code auparavant |
+| `Uninstall.cmd` | Retire le fournisseur possédé ; en mode géré, retire les deux clés TOML inchangées puis arrête uniquement son OpenCodex vérifié | Retire les entrées et correctifs Continue inchangés ; retire aussi l’ajout Codex si un journal de propriété existe ; fermer VS Code auparavant |
+
+`Stop.ps1` concerne la passerelle de ce dossier. La désinstallation retire les programmes et raccourcis gérés, conserve les données personnelles et sauvegardes, et laisse les applications Codex/VS Code et les services OpenCodex externes installés. Une modification utilisateur ou un retrait de catalogue encore en attente interrompt la suppression des programmes concernés.
+
+Un diagnostic de présence, de catalogue ou de santé ne prouve pas l’exécution d’un outil ni une réponse ChatGPT. L’exclusion de mise à jour automatique concerne uniquement l’extension Continue corrigée ; les outils natifs et les mises à jour de l’application Codex ne sont pas reconfigurés.
 
 Pour construire l'exécutable sous Windows : `python installer/build_release.py --output dist`. Le compilateur .NET Framework de Windows crée un lanceur avec l'archive source embarquée ; le lanceur vérifie son empreinte avant extraction. Les exécutables téléchargés sont vérifiés par SHA-256, les paquets Python par leurs verrous avec empreintes et npm par `npm ci`. Le fichier `installer/dependencies.json` décrit les versions fixées. Les sources de correctifs Continue sont dans `integration/continue`.
 
-Options du lanceur : `--root CHEMIN`, `--cache CHEMIN`, `--no-launch`, `--no-shortcuts` ; `--extract-only CHEMIN` vérifie et extrait sans installer. Le chemin d'extraction doit être inexistant.
+Options du lanceur : `--target codex` ou `--target continue`, `--root CHEMIN`, `--cache CHEMIN`, `--no-launch`, `--no-shortcuts` ; `--extract-only CHEMIN` vérifie et extrait sans installer. Le chemin d'extraction doit être inexistant. Une installation sans interaction exige `--target`. `--skip-desktop` est réservé au test Codex avec `--no-launch` et ne prétend pas installer l’application graphique.
 
-La validation détaillée de cette version est documentée dans [docs/VALIDATION.md](docs/VALIDATION.md). L'installation sur le PC de développement dans un dossier neuf ne remplace pas une validation sur toutes les éditions Windows et tous les comptes. La dépendance au site ChatGPT implique qu'un changement de son interface peut nécessiter un nouveau correctif.
+Les preuves disponibles et leurs limites sont consignées séparément dans [docs/VALIDATION.md](docs/VALIDATION.md). Cette présentation décrit les parcours d’installation ; elle ne certifie pas les essais réels de la version 0.4.0 en cours, ni toutes les éditions Windows et tous les comptes. La dépendance au site ChatGPT implique qu'un changement de son interface peut nécessiter un nouveau correctif.
 
-L'outil ne reproduit pas les interfaces privées de l'application Codex : voix temps réel, certains panneaux, partage, ordonnanceur et génération privée d'images. Il regroupe les fonctionnalités de l'intégration effectivement développée.
+Le serveur Connected fourni à **Continue** ne reproduit pas les interfaces privées de l’application Codex : voix temps réel, certains panneaux, partage, ordonnanceur et génération privée d’images. Cette limite du connecteur Continue ne décrit pas les fonctions de l’application native utilisée par la cible Codex.
 
 Documentation originale : [docs/UPSTREAM-README.md](docs/UPSTREAM-README.md). Notices : [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

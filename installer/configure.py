@@ -13,7 +13,7 @@ import time
 
 import normal_profile
 
-VERSION = "0.3.4"
+VERSION = "0.4.0"
 
 
 def write_changed(path: Path, data: bytes, backup: Path):
@@ -296,6 +296,7 @@ def configure(root: Path, source: Path, extension: Path, browser: Path, editor: 
     write_changed(root / "BIENVENUE.md", (source / "installer/BIENVENUE.md").read_bytes(), backup)
     manifest = {
         "product": "Web2API-Continue",
+        "installation_target": "continue",
         "version": VERSION,
         "root": str(root),
         "api_port": port,

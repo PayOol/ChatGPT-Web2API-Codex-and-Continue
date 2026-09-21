@@ -7,3 +7,7 @@ Continue is downloaded from its official Visual Studio Marketplace package, vers
 The installer downloads, rather than embeds, VS Code, Node.js, uv, Git for Windows, ripgrep, Playwright Chromium, Codex, Hostinger MCP, Windows-MCP and their dependencies. Their license and notice files remain inside their installed distributions. Refer to the official distributions and the pinned manifests/lock files for the exact components. Microsoft's VS Code binary distribution has its own license terms. This project is an independent integration and does not imply endorsement by the named vendors.
 
 No user credentials, browser profiles, local conversations or provider configuration files are distributed.
+
+## OpenCodex
+
+Le parcours Codex inclut un paquet séparé `@bitkyc08/opencodex` 2.59.0 (licence MIT), depuis https://github.com/lidge-jun/opencodex. Il réutilise les mécanismes de fournisseurs et de catalogue du projet, sans modifier son code. Les licences des dépendances sont présentes dans les paquets installés.

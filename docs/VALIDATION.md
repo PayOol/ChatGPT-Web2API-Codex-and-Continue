@@ -1,4 +1,24 @@
-# Validation de la distribution 0.3.4
+# Validation de la distribution 0.4.0
+
+## Codex et choix de l'installation — 21 septembre 2026
+
+Le lanceur propose Codex ou Continue. Le parcours Continue garde le profil VS Code normal. Le parcours Codex utilise un dossier distinct, un navigateur propre et le catalogue OpenCodex ; il ne remplace aucun outil, exécutable, plugin ou réglage d'autorisation de Codex. Un proxy OpenCodex déjà configuré est réutilisé sans redémarrage ; à défaut, la distribution gère sa propre instance et ajoute seulement les deux clés de routage nécessaires, avec un journal pour leur retrait sélectif.
+
+Preuves obtenues sur le poste de développement :
+
+- Le véritable serveur natif Codex `0.155.0-alpha.9.2` a retourné `chatgpt-web2api/auto`, affiché `ChatGPT Web2API`, dans `model/list` : 106 modèles au total, et les 105 entrées initiales conservées lors de l'inscription. Le modèle par défaut reste inchangé.
+- Le contrôle de l'inscription a vérifié les octets du TOML avant/après, les fournisseurs existants, leurs combinaisons et alias. La création passe par les routes de gestion de fournisseur et de modèle, sans l'injecteur de configuration complète d'OpenCodex.
+- Un véritable tour Codex, utilisant le compte ChatGPT connecté, a demandé la lecture d'un fichier de test dont le contenu aléatoire n'était pas dans la demande. Codex a exécuté `Get-Content -Raw preuve.txt` avec son outil natif, puis ChatGPT a renvoyé exactement la valeur obtenue. Cette preuve inclut la demande d'outil, son exécution avec code zéro et le retour de résultat au modèle.
+- Le premier essai avait répondu sans outil. La correction porte sur l'explication du format de transport : les outils natifs libres reçoivent leur code dans `arguments.input`. Leur catalogue et leurs implémentations ne sont pas modifiés.
+- Une convergence OpenCodex marquée dégradée par d'autres fournisseurs est acceptée seulement après vérification effective de notre entrée. Les codes d'avertissement restent visibles ; ils ne sont pas une certification des autres fournisseurs.
+
+Le transport conserve les schémas, appels et résultats d'outils. Les tests couvrent leur validation avant émission, les erreurs tardives et l'annulation sans renvoi. Des messages de maintien de connexion, explicitement identifiés comme provenant de la passerelle, traversent l'adaptateur OpenCodex pendant les attentes silencieuses. Les attentes de plusieurs heures restent validées par simulation, pas par une session réelle de plusieurs heures.
+
+Le workflow Windows comporte deux installations distinctes exécutées depuis l'EXE : Continue avec chargement dans le vrai éditeur et Codex avec un profil isolé, lecture du catalogue par le vrai serveur natif et désinscription sélective. La branche Codex du workflow utilise explicitement `--skip-desktop --no-launch` : elle ne certifie donc pas l'installation Microsoft Store ni un parcours visuel du sélecteur de modèles. L'authentification ChatGPT nécessite le compte de l'utilisateur et n'est pas embarquée.
+
+La suite locale complète a réussi : **935 tests**, **16 sous-tests**, un test ignoré faute de permission Windows de création de liens symboliques. Les contrôles ciblés complètent les corrections de première installation effectuées ensuite. Une installation neuve isolée a terminé ses 17 étapes, puis le serveur Codex fourni a chargé le modèle parmi ses six entrées. Les preuves distantes définitives sont les artefacts du workflow associés à la version publiée.
+
+Les sections suivantes conservent les preuves des versions précédentes.
 
 ## Profil normal — 21 septembre 2026
 

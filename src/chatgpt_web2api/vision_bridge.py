@@ -3,9 +3,51 @@
 import copy
 import hashlib
 import json
+import logging
 from pathlib import Path
 
 from . import media_registry as registry
+
+logger = logging.getLogger(__name__)
+
+
+class ImageUploadError(RuntimeError):
+    """Image preparation failed before click_send; no prompt was submitted."""
+
+
+# FileList is the native picker's last selection, not ChatGPT's draft state:
+# ChatGPT leaves it populated after submitting an image. Inspect draft chips,
+# thumbnails and upload activity instead, including non-image attachments.
+COMPOSER_STATE_JS = """(()=>{
+    const f=document.querySelector('#prompt-textarea')?.closest('form');
+    const input=f?.querySelector('input[type=file]#upload-files');
+    const images=[...(f?.querySelectorAll('img')||[])];
+    const attachments=[...(f?.querySelectorAll(
+        '[data-testid*="attachment"],[data-testid*="file-thumbnail"],[data-testid*="file-pill"]'
+    )||[])].length;
+    const removals=[...(f?.querySelectorAll('button')||[])].filter(b=>
+        /remove|supprimer|retirer/i.test(b.getAttribute('aria-label')||'')).length;
+    const send=f?.querySelector('[data-testid=send-button]');
+    return {input,state:{ready:!!input&&!input.disabled,
+        images:images.length,attachments:attachments+removals,
+        loaded:images.filter(i=>i.complete&&i.naturalWidth>0).length,
+        files:input?.files?.length||0,
+        generating:!!document.querySelector('[data-testid=stop-button]'),
+        sendReady:!!send&&!send.disabled,
+        progress:!!f?.querySelector('[role=progressbar],[aria-busy=true]')}};
+})()"""
+
+
+def _require_empty_composer(state):
+    if not state["ready"]:
+        raise RuntimeError("ChatGPT attachment input is unavailable or disabled; no image was sent")
+    if state["generating"]:
+        raise RuntimeError("ChatGPT is still generating; no image was sent")
+    if state["images"] or state.get("attachments") or state.get("progress"):
+        raise RuntimeError(
+            "ChatGPT composer contains an unsent attachment or an upload in progress; "
+            "no image was added. Finish or remove that draft attachment before retrying."
+        )
 
 
 def normalize_images(messages):
@@ -51,24 +93,25 @@ async def attach_images(driver, paths, timeout=60):
 
     if not paths:
         return
-    # Refuse to mix in any attachment the user may already be composing.
-    before = json.loads(
-        await driver._js_strict(
-            """JSON.stringify((()=>{const f=document.querySelector('#prompt-textarea')?.closest('form');const i=f?.querySelector('input[type=file]#upload-files');return {ready:!!i&&!i.disabled,images:f?.querySelectorAll('img').length||0,files:i?.files?.length||0,generating:!!document.querySelector('[data-testid=stop-button]')}})())"""
-        )
-    )
-    if not before["ready"] or before["images"] or before["files"] or before["generating"]:
-        raise RuntimeError("Image upload requires an idle composer with no existing attachments")
+    before = json.loads(await driver._js_strict(f"JSON.stringify(({COMPOSER_STATE_JS}).state)"))
+    _require_empty_composer(before)
+    if before["files"]:
+        logger.info("Image upload: resetting stale file picker selection (%d)", before["files"])
     result = await driver._cdp(
         "Runtime.evaluate",
         {
-            "expression": "document.querySelector('#prompt-textarea').closest('form').querySelector('input[type=file]#upload-files')",
+            # Recheck and reset in the same evaluation. Clearing the native
+            # input (without a change event) does not remove React attachments.
+            # It also makes re-uploading the SAME screenshot fire a change event.
+            "expression": "(()=>{const {input,state}=" + COMPOSER_STATE_JS + ";"
+            "if(!state.ready||state.generating||state.images||state.attachments||state.progress)"
+            "return null;input.value='';return input;})()",
             "returnByValue": False,
         },
     )
     object_id = result.get("result", {}).get("result", {}).get("objectId")
     if not object_id:
-        raise RuntimeError("ChatGPT attachment input is unavailable")
+        raise RuntimeError("ChatGPT composer changed before image upload; no image was added")
     try:
         uploaded = await driver._cdp(
             "DOM.setFileInputFiles", {"objectId": object_id, "files": paths}, _retry=False
@@ -81,12 +124,12 @@ async def attach_images(driver, paths, timeout=60):
     stable = 0
     while time.monotonic() < deadline:
         await driver._dom.check_rate_limit()
-        state = json.loads(
-            await driver._js_strict(
-                """JSON.stringify((()=>{const f=document.querySelector('#prompt-textarea')?.closest('form');const imgs=[...(f?.querySelectorAll('img')||[])];const b=f?.querySelector('[data-testid=send-button]');return {images:imgs.filter(i=>i.complete&&i.naturalWidth>0).length,sendReady:!!b&&!b.disabled,progress:!!f?.querySelector('[role=progressbar]'),alerts:[...document.querySelectorAll('[role=alert]')].map(e=>e.textContent).join(' ').slice(0,600)}})())"""
+        state = json.loads(await driver._js_strict(f"JSON.stringify(({COMPOSER_STATE_JS}).state)"))
+        if state["generating"]:
+            raise RuntimeError(
+                "ChatGPT started generating during image upload; no send was clicked"
             )
-        )
-        if state["images"] >= len(paths) and state["sendReady"] and not state["progress"]:
+        if state["loaded"] >= len(paths) and state["sendReady"] and not state["progress"]:
             stable += 1
             if stable >= 3:
                 return

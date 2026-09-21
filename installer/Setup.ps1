@@ -1,5 +1,36 @@
-param([string]$InstallRoot = "$env:LOCALAPPDATA\Programs\Web2API-Continue", [string]$CacheDirectory = '', [switch]$NoLaunch, [switch]$NoShortcuts)
+param([string]$InstallRoot = '', [string]$CacheDirectory = '', [ValidateSet('','codex','continue')][string]$Target='', [switch]$NoLaunch, [switch]$NoShortcuts, [switch]$SkipDesktop)
 $ErrorActionPreference = 'Stop'
+if (-not $Target -and $InstallRoot -and (Test-Path -LiteralPath (Join-Path $InstallRoot 'installation.json'))) {
+    $previous=Get-Content -LiteralPath (Join-Path $InstallRoot 'installation.json') -Raw | ConvertFrom-Json
+    $Target=$previous.installation_target
+    if (-not $Target) { $Target='continue' }
+}
+while (-not $Target) {
+    if ($NoLaunch -or [Console]::IsInputRedirected) { throw 'Installation sans interaction : preciser --target codex ou --target continue.' }
+    Write-Host ''
+    Write-Host 'Ou souhaitez-vous utiliser ChatGPT Web2API ?'
+    Write-Host '  1 - Codex : ajouter le modele ; outils natifs de Codex'
+    Write-Host '  2 - Continue : VS Code habituel, modele et outils Continue'
+    $choice=Read-Host 'Votre choix (1 ou 2)'
+    if ($choice -eq '1') { $Target='codex' }
+    elseif ($choice -eq '2') { $Target='continue' }
+    else { Write-Host 'Saisir 1 ou 2.' }
+}
+if (-not $InstallRoot) {
+    $folder=if ($Target -eq 'codex') { 'Web2API-Codex' } else { 'Web2API-Continue' }
+    $InstallRoot=Join-Path $env:LOCALAPPDATA ('Programs\'+$folder)
+}
+if (Test-Path -LiteralPath (Join-Path $InstallRoot 'installation.json')) {
+    $previous=Get-Content -LiteralPath (Join-Path $InstallRoot 'installation.json') -Raw | ConvertFrom-Json
+    $previousTarget=$previous.installation_target
+    if (-not $previousTarget) { $previousTarget='continue' }
+    if ($previousTarget -ne $Target) { throw 'Ce dossier contient une autre integration. Choisir un dossier distinct pour conserver les deux installations.' }
+}
+if ($Target -eq 'codex') {
+    & (Join-Path $PSScriptRoot 'Setup-Codex.ps1') -InstallRoot $InstallRoot -CacheDirectory $CacheDirectory -NoLaunch:$NoLaunch -NoShortcuts:$NoShortcuts -SkipDesktop:$SkipDesktop
+    return
+}
+if ($SkipDesktop) { throw '--skip-desktop concerne uniquement les tests de la cible Codex.' }
 $ProgressPreference='SilentlyContinue'
 foreach ($name in @('VSCODE_IPC_HOOK_CLI','VSCODE_PORTABLE','ELECTRON_RUN_AS_NODE')) {
     Remove-Item -LiteralPath ('Env:\'+$name) -ErrorAction SilentlyContinue

@@ -25,14 +25,19 @@ internal static class Bootstrap {
                     case "--extract-only": extract = Path.GetFullPath(args[++i]); unattended = true; break;
                     case "--root": forwarded.Append(" -InstallRoot ").Append(Quote(args[++i])); break;
                     case "--cache": forwarded.Append(" -CacheDirectory ").Append(Quote(args[++i])); break;
+                    case "--target":
+                        string target = args[++i].ToLowerInvariant();
+                        if (target != "codex" && target != "continue") throw new ArgumentException("Cible attendue : codex ou continue.");
+                        forwarded.Append(" -Target ").Append(Quote(target)); break;
+                    case "--skip-desktop": forwarded.Append(" -SkipDesktop"); break;
                     case "--no-launch": forwarded.Append(" -NoLaunch"); unattended = true; break;
                     case "--no-shortcuts": forwarded.Append(" -NoShortcuts"); break;
                     default: throw new ArgumentException("Option inconnue : " + args[i]);
                 }
             }
-            Console.Title = "Installation ChatGPT Web2API + Continue";
-            Console.WriteLine("Preparation de l'installateur 0.3.4 - verification de l'archive embarquee...");
-            string folder = extract ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Web2API-Continue-Setup", "0.3.4-" + Guid.NewGuid().ToString("N"));
+            Console.Title = "Installation ChatGPT Web2API - Codex ou Continue";
+            Console.WriteLine("Preparation de l'installateur 0.4.0 - verification de l'archive embarquee...");
+            string folder = extract ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Web2API-Continue-Setup", "0.4.0-" + Guid.NewGuid().ToString("N"));
             if (Directory.Exists(folder)) throw new IOException("Le dossier d'extraction existe deja : " + folder);
             Directory.CreateDirectory(folder);
             using (Stream payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")) {
@@ -60,7 +65,7 @@ internal static class Bootstrap {
                 }
             }
             if (extract != null) { Console.WriteLine("Archive verifiee et extraite : " + folder); return 0; }
-            Console.Title = "Installation ChatGPT Web2API + Continue";
+            Console.Title = "Installation ChatGPT Web2API - Codex ou Continue";
             Console.WriteLine("Installation complete pour Windows x64. Connexion Internet requise.");
             string shell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
             var start = new ProcessStartInfo(shell, "-NoProfile -ExecutionPolicy Bypass -File " + Quote(Path.Combine(folder, "installer", "Setup.ps1")) + forwarded) { UseShellExecute = false, WorkingDirectory = folder };

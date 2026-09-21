@@ -35,7 +35,7 @@ from .config import Config
 from .cross_process_lock import LockAcquisitionError
 from .lock_resolver import MutationLock, OwnedTabRequiredError, resolve_mutation_lock
 from .tool_bridge import ToolBridge, ToolProtocolError, ToolRequestError
-from .vision_bridge import images_for_turn, normalize_images
+from .vision_bridge import ImageUploadError, images_for_turn, normalize_images
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,18 @@ class APIServer:
         self.app.router.add_get("/v1/projects", self._handle_projects)
         self.app.router.add_get("/health", self._handle_health)
         self.app.router.add_get("/", self._handle_health)
+        self.app.router.add_post("/codex/v1/chat/completions", self._handle_codex_chat)
+        self.app.router.add_get("/codex/v1/models", self._handle_codex_models)
+
+    async def _handle_codex_chat(self, request):
+        from .codex_transport import chat
+
+        return await chat(self, request)
+
+    async def _handle_codex_models(self, request):
+        from .codex_transport import models
+
+        return await models(self, request)
 
     # ── Auth ──────────────────────────────────────────────────
 
@@ -602,6 +614,18 @@ class APIServer:
                 status=422,
                 headers={"x-should-retry": "false"},
             )
+        if isinstance(exc, ImageUploadError):
+            return web.json_response(
+                {
+                    "error": {
+                        "message": str(exc),
+                        "type": "invalid_request_error",
+                        "code": "image_upload_failed_before_send",
+                    }
+                },
+                status=422,
+                headers={"x-should-retry": "false"},
+            )
         if isinstance(exc, (UncertainSendError, SendReadinessError, TimeoutError)):
             return web.json_response(
                 {
@@ -822,6 +846,11 @@ class APIServer:
             try:
                 answer = await collect(text, image_paths)
                 message = bridge.parse(answer)
+            except ImageUploadError:
+                # Unlike a lost response, a failed upload never reached the
+                # send button. Let the user retry after correcting the draft.
+                self._agent_state.complete(request_key)
+                raise
             except ToolProtocolError as exc:
                 logger.warning("Agent response requires format repair: %s", exc)
                 await self._agent_state.reserve()

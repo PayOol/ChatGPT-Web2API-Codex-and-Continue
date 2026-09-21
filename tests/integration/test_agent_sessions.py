@@ -8,6 +8,7 @@ from test_agent_bridge import CALL, MESSAGES, HTTPTests, body
 
 from chatgpt_web2api.agent_sessions import AgentState, UncertainSendError, message_hash
 from chatgpt_web2api.cdp_driver import RateLimitError, SendReadinessError
+from chatgpt_web2api.vision_bridge import ImageUploadError
 
 
 # Reuse the HTTP fixture without importing its original tests twice.
@@ -95,6 +96,20 @@ class SessionHTTPTests(unittest.IsolatedAsyncioTestCase):
             await r.read()
         self.assertEqual(len(self.driver.prompts), 1)
         self.assertEqual(self.driver.navigations, 1)
+
+    async def test_image_upload_failure_before_send_allows_explicit_retry(self):
+        self.driver.answers = [
+            ImageUploadError("Unsent attachment"),
+            {"content": "Image received", "tool_calls": []},
+        ]
+        r = await self.client.post("/v1/chat/completions", json=body())
+        self.assertEqual(r.status, 422)
+        self.assertEqual((await r.json())["error"]["code"], "image_upload_failed_before_send")
+        self.assertEqual(r.headers["x-should-retry"], "false")
+        self.assertEqual(self.api._agent_state.uncertain, {})
+        r = await self.client.post("/v1/chat/completions", json=body())
+        self.assertEqual(r.status, 200)
+        self.assertEqual((await r.json())["choices"][0]["message"]["content"], "Image received")
 
     async def test_rate_limit_pauses_other_requests_without_navigation(self):
         self.driver.answers = [RateLimitError(retry_after=300)]

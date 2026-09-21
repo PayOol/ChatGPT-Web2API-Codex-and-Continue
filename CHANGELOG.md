@@ -1,3 +1,12 @@
+# Distribution 0.4.0
+
+- Choix Codex ou Continue au lancement de l’installateur Windows.
+- Modèle ChatGPT Web2API supplémentaire via OpenCodex, sans remplacement des outils natifs de Codex.
+- Transport Codex avec maintien de connexion, validation des appels d’outils et annulation sans renvoi du message.
+- Installation Codex séparée, réutilisation d’OpenCodex existant, journal de propriété et retrait sélectif.
+- Conservation du profil VS Code normal et du parcours Continue.
+- Réparation du sélecteur de fichiers ChatGPT résiduel avant un nouvel envoi d’image.
+
 # Changelog
 
 All notable changes to ChatGPT-Web2API will be documented in this file.

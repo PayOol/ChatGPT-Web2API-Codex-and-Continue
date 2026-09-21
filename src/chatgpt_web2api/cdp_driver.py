@@ -1806,9 +1806,16 @@ class CDPDriver:
             # Type and send.
             await self.type_message(text)
             if image_paths:
-                from .vision_bridge import attach_images
+                from .vision_bridge import ImageUploadError, attach_images
 
-                await attach_images(self, image_paths)
+                try:
+                    await attach_images(self, image_paths)
+                except RateLimitError:
+                    raise
+                except Exception as exc:
+                    # This narrow boundary is BEFORE click_send. Do not label
+                    # submission/response failures as safely retryable.
+                    raise ImageUploadError(str(exc)) from exc
             await self.click_send()
 
             # A2 Step 6: wait for the IdentityListener to capture the UUID.

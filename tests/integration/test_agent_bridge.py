@@ -58,6 +58,25 @@ class ProtocolTests(unittest.TestCase):
     def test_plain_chat_not_wrapped(self):
         self.assertIsNone(ToolBridge.from_request({"messages": MESSAGES}))
 
+    def test_codex_freeform_source_is_preserved_in_function_envelope(self):
+        tools = [{"type": "function", "function": {
+            "name": "exec", "description": "Run raw JavaScript; tools.exec_command is available.",
+            "parameters": {"type": "object", "required": ["input"],
+                           "properties": {"input": {"type": "string"}},
+                           "additionalProperties": False},
+        }}]
+        original = copy.deepcopy(tools)
+        bridge = ToolBridge.from_request(body(tools=tools))
+        prompt = bridge.prompt(MESSAGES)
+        self.assertIn("arguments.input", prompt)
+        self.assertIn("external Codex client executes it", prompt)
+        self.assertEqual(tools, original)
+        source = 'text(await tools.exec_command({cmd:"Get-Content -LiteralPath preuve.txt"}));'
+        parsed = bridge.parse(wrap(bridge, [{"name": "exec", "arguments": {"input": source}}]))
+        self.assertEqual(json.loads(parsed["tool_calls"][0]["function"]["arguments"]), {"input": source})
+        with self.assertRaises(ToolProtocolError):
+            bridge.parse(wrap(bridge, [{"name": "exec", "arguments": {"code": source}}]))
+
     def test_frame_delimiter_inside_json_string_does_not_truncate(self):
         text = wrap(self.bridge, content="A literal </web2api_response> in code")
         self.assertEqual(
