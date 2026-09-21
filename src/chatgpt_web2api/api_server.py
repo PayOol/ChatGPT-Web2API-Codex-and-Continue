@@ -39,6 +39,16 @@ from .vision_bridge import ImageUploadError, images_for_turn, normalize_images
 
 logger = logging.getLogger(__name__)
 
+
+class PendingFormatRepair(ToolProtocolError):
+    """The exact pending turn finished but needs its one format-only repair."""
+
+    def __init__(self, error, nonce, conversation):
+        super().__init__(str(error))
+        self.nonce = nonce
+        self.conversation = conversation
+
+
 # Model mapping: user-facing names → ChatGPT web slugs
 MODEL_MAP = {
     "gpt-5.5": "gpt-5-5",
@@ -468,9 +478,28 @@ class APIServer:
                             + full_text
                         )
                     if request_key in self._agent_state.uncertain:
-                        recovered = await self._recover_agent_reply(
-                            tool_bridge, full_text, request_key, reuse_id
-                        )
+                        try:
+                            recovered = await self._recover_agent_reply(
+                                tool_bridge, full_text, request_key, reuse_id
+                            )
+                        except PendingFormatRepair as exc:
+                            # Continue the already-completed chat. Never resend
+                            # the original request or any tool result here.
+                            tool_bridge.nonce = exc.nonce
+                            self._driver._current_conv_id = exc.conversation
+                            await self._agent_state.reserve()
+                            return await self._agent_response(
+                                request,
+                                model_slug,
+                                full_text,
+                                timeout,
+                                tool_bridge,
+                                stream,
+                                messages,
+                                scope,
+                                request_key,
+                                repair_error=exc,
+                            )
                         if recovered:
                             message, conv_id = recovered
                             self._remember_agent_reply(
@@ -744,8 +773,6 @@ class APIServer:
             if (
                 not snapshot.get("paired")
                 or snapshot.get("generating")
-                or snapshot.get("unsafe_markup")
-                or not snapshot.get("literal", True)
                 or not snapshot.get("conversation")
             ):
                 return None
@@ -770,12 +797,27 @@ class APIServer:
             if digest(normalize_text(snapshot.get("user", ""))) != expected_hash:
                 return None
             bridge.nonce = nonce
-            message = bridge.parse(bridge.validated_frame(snapshot.get("assistant", "")))
+            try:
+                if snapshot.get("unsafe_markup") or not snapshot.get("literal", True):
+                    raise ToolProtocolError(
+                        "The completed answer must use one literal fenced JSON response"
+                    )
+                message = bridge.parse(bridge.validated_frame(snapshot.get("assistant", "")))
+            except ToolProtocolError as exc:
+                if not snapshot.get("completed"):
+                    return None
+                if (info or {}).get("repair_attempted"):
+                    raise ToolProtocolError(
+                        "ChatGPT's answer is still invalid after one format repair; no tool was executed"
+                    ) from exc
+                raise PendingFormatRepair(exc, nonce, snapshot["conversation"]) from exc
             logger.info(
                 "Recovered completed Agent response from existing conversation without sending: %s",
                 snapshot["conversation"],
             )
             return message, snapshot["conversation"]
+        except ToolProtocolError:
+            raise
         except Exception as exc:
             logger.warning(
                 "Pending Agent response not recoverable (%s); resubmission remains blocked",
@@ -804,6 +846,7 @@ class APIServer:
         scope: str,
         request_key: str,
         image_paths: list[str] | None = None,
+        repair_error: ToolProtocolError | None = None,
     ) -> web.Response:
         """Return validated calls/results with OpenAI-compatible SSE or JSON.
 
@@ -815,13 +858,14 @@ class APIServer:
 
         budgets = DetectorBudgets.from_config(self._config.chatgpt, model)
 
-        async def collect(prompt: str, attachments=None) -> str:
+        async def collect(prompt: str, attachments=None, *, repair=False) -> str:
             async def send() -> str:
                 self._agent_state.begin(
                     request_key,
                     nonce=bridge.nonce,
                     prompt=prompt,
                     conversation=self._driver._current_conv_id,
+                    repair_attempted=repair,
                 )
                 self._agent_state.next_send = time.time() + self._agent_state.interval
                 self._agent_state.save()
@@ -844,7 +888,11 @@ class APIServer:
         self._agent_state.begin(request_key)
         async with asyncio.timeout(timeout if timeout > 0 else None):
             try:
-                answer = await collect(text, image_paths)
+                answer = await collect(
+                    bridge.repair_prompt(repair_error) if repair_error else text,
+                    None if repair_error else image_paths,
+                    repair=repair_error is not None,
+                )
                 message = bridge.parse(answer)
             except ImageUploadError:
                 # Unlike a lost response, a failed upload never reached the
@@ -852,9 +900,11 @@ class APIServer:
                 self._agent_state.complete(request_key)
                 raise
             except ToolProtocolError as exc:
+                if repair_error:
+                    raise
                 logger.warning("Agent response requires format repair: %s", exc)
                 await self._agent_state.reserve()
-                answer = await collect(bridge.repair_prompt(exc))
+                answer = await collect(bridge.repair_prompt(exc), repair=True)
                 message = bridge.parse(answer)
 
         conv_id = self._driver._current_conv_id or ""

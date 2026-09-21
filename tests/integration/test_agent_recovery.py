@@ -9,6 +9,7 @@ from test_agent_bridge import CALL, HTTPTests, body
 
 from chatgpt_web2api.agent_sessions import AgentState
 from chatgpt_web2api.cdp_driver import GenerationStuckError
+from chatgpt_web2api.tool_bridge import ToolProtocolError
 
 
 class RecoveryTests(unittest.IsolatedAsyncioTestCase):
@@ -110,6 +111,85 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
             await r.read()
             self.assertEqual(r.status, 200)
         self.assertEqual(len(self.driver.prompts), 1)
+
+    async def test_completed_plain_answer_gets_format_only_repair_on_retry(self):
+        snapshot = await self.fail_then_snapshot()
+        snapshot.update(
+            assistant="Plain answer without protocol",
+            literal=False,
+            unsafe_markup=True,
+            completed=True,
+        )
+        self.driver.answers = [{"content": "Recovered answer", "tool_calls": []}]
+        original_nonce = next(iter(self.api._agent_state.pending_frames.values()))["nonce"]
+        r = await self.client.post("/v1/chat/completions", json=body())
+        self.assertEqual(r.status, 200)
+        self.assertEqual((await r.json())["choices"][0]["message"]["content"], "Recovered answer")
+        self.assertEqual(len(self.driver.prompts), 2)
+        self.assertEqual(self.driver.navigations, 1)
+        self.assertIn("Correct its format", self.driver.prompts[-1])
+        self.assertIn(original_nonce, self.driver.prompts[-1])
+        self.assertNotIn("Read demo.py", self.driver.prompts[-1])
+        self.assertEqual(self.api._agent_state.uncertain, {})
+        # A subsequent retry replays the validated result without another send.
+        r = await self.client.post("/v1/chat/completions", json=body())
+        await r.read()
+        self.assertEqual(r.status, 200)
+        self.assertEqual(len(self.driver.prompts), 2)
+
+    async def test_plain_answer_without_current_turn_completion_stays_blocked(self):
+        snapshot = await self.fail_then_snapshot()
+        snapshot.update(assistant="Plain answer", literal=False, completed=False)
+        r = await self.client.post("/v1/chat/completions", json=body())
+        await r.read()
+        self.assertEqual(r.status, 422)
+        self.assertEqual(len(self.driver.prompts), 1)
+
+    async def test_cancelled_repair_resumes_by_reading_its_result_not_sending_again(self):
+        snapshot = await self.fail_then_snapshot()
+        snapshot.update(assistant="Plain answer", literal=False, completed=True)
+        self.driver.answers = [GenerationStuckError("phase_1_appear", 90)]
+        r = await self.client.post("/v1/chat/completions", json=body())
+        await r.read()
+        self.assertEqual(r.status, 504)
+        info = next(iter(self.api._agent_state.pending_frames.values()))
+        self.assertTrue(info["repair_attempted"])
+        with tempfile.TemporaryDirectory() as folder:
+            self.api._agent_state.path = Path(folder) / "state.json"
+            self.api._agent_state.save()
+            self.api._agent_state = AgentState(self.api._agent_state.path, interval=0)
+            snapshot.update(
+                user=self.driver.prompts[-1], assistant="Still no protocol", literal=False
+            )
+            for _ in range(2):
+                r = await self.client.post("/v1/chat/completions", json=body())
+                self.assertEqual(r.status, 422)
+                self.assertEqual((await r.json())["error"]["code"], "invalid_tool_response")
+            self.assertEqual(len(self.driver.prompts), 2)
+            snapshot.update(
+                assistant=f'<web2api_response nonce="{info["nonce"]}">'
+                + '{"content":"Recovered repair","tool_calls":[]}</web2api_response>',
+                literal=True,
+                unsafe_markup=False,
+            )
+            r = await self.client.post("/v1/chat/completions", json=body())
+            self.assertEqual(r.status, 200)
+            self.assertEqual(
+                (await r.json())["choices"][0]["message"]["content"], "Recovered repair"
+            )
+            self.assertEqual(len(self.driver.prompts), 2)
+
+    async def test_immediate_invalid_answer_repairs_once_and_persists_the_budget(self):
+        self.driver.answers = [
+            ToolProtocolError("Plain answer"),
+            ToolProtocolError("Still invalid"),
+        ]
+        r = await self.client.post("/v1/chat/completions", json=body())
+        await r.read()
+        self.assertEqual(r.status, 422)
+        self.assertEqual(len(self.driver.prompts), 2)
+        info = next(iter(self.api._agent_state.pending_frames.values()))
+        self.assertTrue(info["repair_attempted"])
 
 
 del HTTPTests

@@ -1,3 +1,9 @@
+# Validation de la distribution 0.4.1
+
+## Réponses terminées hors protocole — 21 septembre 2026
+
+Le correctif reconnaît une réponse terminée dont le format attendu manque et permet une seule correction du format, y compris après une annulation. La preuve sur la conversation bloquée et les cas couverts figurent dans [PENDING-FORMAT-FIX.md](PENDING-FORMAT-FIX.md). Les résultats des suites et des installations Windows sont fournis par le workflow associé au commit de cette version.
+
 # Validation de la distribution 0.4.0
 
 ## Codex et choix de l'installation — 21 septembre 2026

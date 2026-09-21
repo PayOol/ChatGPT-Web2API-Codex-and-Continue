@@ -1727,6 +1727,7 @@ class CDPDriver:
             "return JSON.stringify({conversation:c?c[1]:'',"
             "user:u?((u.querySelector('.rich-text-user-turn,.whitespace-pre-wrap')||u).textContent||''):'',"
             "assistant:protocol.text,literal:protocol.literal,unsafe_markup:protocol.unsafe_markup,"
+            "completed:web2apiAgentHasActions(a),"
             "paired:!!(u&&a&&(u.compareDocumentPosition(a)&Node.DOCUMENT_POSITION_FOLLOWING)),"
             "generating:!!document.querySelector('[data-testid=stop-button]')});})()"
         )

@@ -1,3 +1,10 @@
+# Distribution 0.4.1
+
+- Corrige l’attente infinie lorsqu’une réponse ChatGPT terminée ignore le format attendu.
+- Répare le format une seule fois et récupère les réponses après annulation, sans renvoyer les actions originales.
+- Conserve la limite de réparation après redémarrage et la protection contre les doubles envois.
+- Correctif vérifié sur la conversation bloquée ; détails dans [docs/PENDING-FORMAT-FIX.md](docs/PENDING-FORMAT-FIX.md).
+
 # Distribution 0.4.0
 
 - Choix Codex ou Continue au lancement de l’installateur Windows.

@@ -12,4 +12,16 @@ function web2apiAgentText(last) {
     'em,strong,a,del,s,code,table,ul,ol,h1,h2,h3,h4,blockquote'
   )};
 }
+
+function web2apiAgentHasActions(last) {
+  // Stay inside this assistant turn; an older answer must not complete it.
+  for (var scope=last, depth=0; scope && depth<8; scope=scope.parentElement, depth++) {
+    if (scope.querySelectorAll('[data-message-author-role=assistant]').length>1) return false;
+    if (Array.from(scope.querySelectorAll(
+      '[data-testid="copy-turn-action-button"],[data-testid="feedback-turn-action-button"],'
+      +'[data-testid="good-response-turn-action-button"],[data-testid="bad-response-turn-action-button"]'
+    )).some(b=>b.getClientRects().length>0)) return true;
+  }
+  return false;
+}
 """

@@ -12,6 +12,7 @@ from chatgpt_web2api import completion_detector as module
 from chatgpt_web2api.cdp_driver import CDPJSError, GenerationStuckError, RateLimitError
 from chatgpt_web2api.completion_detector import CompletionDetector, DetectorBudgets
 from chatgpt_web2api.config import ChatGPTConfig, Config
+from chatgpt_web2api.tool_bridge import ToolProtocolError
 from chatgpt_web2api.turn_anchor import TurnAnchor, TurnEndResult
 
 
@@ -125,6 +126,43 @@ async def test_unreadable_browser_does_not_wait_forever(monkeypatch):
     with pytest.raises(CDPJSError):
         async for _ in detector.stream_until_complete(**kwargs):
             pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mismatch", [None, "user", "conversation", "paired", "generating", "completed"]
+)
+async def test_finished_plain_answer_is_repaired_only_for_the_exact_sent_turn(
+    monkeypatch, mismatch
+):
+    detector, driver, clock, kwargs = simulated_detector(monkeypatch, appear_after=100000)
+    kwargs["timeout"] = 7200
+    kwargs["turn_anchor"] = TurnAnchor(
+        sent_text="hi", mode="existing_conversation", conversation_id_at_capture="test-conversation"
+    )
+    snapshot = dict(
+        user="hi",
+        assistant="old answer",
+        paired=True,
+        completed=True,
+        generating=False,
+        conversation="test-conversation",
+    )
+    changes = dict(
+        user="other prompt",
+        conversation="other chat",
+        paired=False,
+        generating=True,
+        completed=False,
+    )
+    if mismatch:
+        snapshot[mismatch] = changes[mismatch]
+    driver.read_agent_exchange = AsyncMock(return_value=snapshot)
+    with pytest.raises(ToolProtocolError if mismatch is None else GenerationStuckError):
+        async for _ in detector.stream_until_complete(**kwargs):
+            pass
+    assert clock.now == (3600 if mismatch is None else 7200)
+    driver._fetch_end_turn_for_turn.assert_not_awaited()
 
 
 def test_all_default_models_allow_unlimited_generation():

@@ -433,6 +433,34 @@ class CompletionDetector:
                     clean = clean[8:]
                 if clean.startswith(response_marker):
                     break
+                if candidate and time.monotonic() - last_progress >= 1.0:
+                    # A finished plain-language answer has no protocol nonce.
+                    # Waiting for that nonce forever hides a format error. Only
+                    # accept completion after matching the WHOLE sent prompt,
+                    # its following assistant and that turn's finished actions.
+                    from .tool_bridge import ToolProtocolError
+                    from .turn_anchor import normalize_text
+
+                    try:
+                        snapshot = await d.read_agent_exchange()
+                    except Exception as exc:
+                        logger.debug("Plain Agent answer probe unavailable: %s", type(exc).__name__)
+                        snapshot = {}
+                    expected_chat = turn_anchor.conversation_id_at_capture
+                    if (
+                        snapshot.get("completed")
+                        and snapshot.get("paired")
+                        and not snapshot.get("generating")
+                        and snapshot.get("assistant") == candidate
+                        and (not expected_chat or snapshot.get("conversation") == expected_chat)
+                        and normalize_text(snapshot.get("user", ""))
+                        == normalize_text(turn_anchor.sent_text)
+                    ):
+                        d._current_conv_id = snapshot.get("conversation") or d._current_conv_id
+                        raise ToolProtocolError(
+                            "The completed answer is missing this request's response wrapper. "
+                            "Reformat the previous answer; do not repeat completed actions."
+                        )
             elif current_count > initial_count:
                 break
             if appear_budget > 0 and time.monotonic() - last_progress > appear_budget:

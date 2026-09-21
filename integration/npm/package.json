@@ -1,6 +1,6 @@
 {
   "name": "web2api-connected-runtime",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "dependencies": { "@openai/codex": "0.154.0", "hostinger-api-mcp": "1.63.2" }
 }

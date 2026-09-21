@@ -131,13 +131,17 @@ class AgentState:
         self.cooldown_until = max(self.cooldown_until, time.time() + max(180, seconds))
         self.save()
 
-    def begin(self, key, *, nonce=None, prompt=None, conversation=None):
+    def begin(self, key, *, nonce=None, prompt=None, conversation=None, repair_attempted=False):
         self.uncertain[key] = time.time()
         if nonce and prompt:
             from .turn_anchor import normalize_text
 
+            previous_repair = self.pending_frames.get(key, {}).get("repair_attempted", False)
             self.pending_frames[key] = dict(
-                nonce=nonce, prompt_hash=digest(normalize_text(prompt)), conversation=conversation
+                nonce=nonce,
+                prompt_hash=digest(normalize_text(prompt)),
+                conversation=conversation,
+                repair_attempted=repair_attempted or previous_repair,
             )
         self.save()
 
