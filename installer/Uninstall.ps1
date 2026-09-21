@@ -2,11 +2,13 @@ $ErrorActionPreference='Stop'
 $manifest=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installation.json') -Raw | ConvertFrom-Json
 $root=[IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
 if ($manifest.product -ne 'Web2API-Continue' -or [IO.Path]::GetFullPath($manifest.root).TrimEnd('\') -ne $root) { throw 'Identite du dossier non verifiee.' }
-$editors=@(Get-CimInstance Win32_Process -Filter "Name = 'Code.exe'" | Where-Object { $_.ExecutablePath -eq (Join-Path $root 'apps\vscode\Code.exe') })
-if($editors.Count){throw 'Fermer la fenetre VS Code de cette installation puis relancer.'}
+$editors=@(Get-CimInstance Win32_Process -Filter "Name = 'Code.exe'")
+if($editors.Count){throw 'Enregistrer les fichiers et fermer VS Code puis relancer.'}
 & (Join-Path $root 'Stop.ps1') -CloseBrowser
-. (Join-Path $PSScriptRoot 'Portable.ps1')
-Save-PortableEditorData $root
+& (Join-Path $root 'venv\Scripts\python.exe') (Join-Path $root 'app\installer\normal_profile.py') --detach $root
+if ($LASTEXITCODE -ne 0) { throw 'Retrait du profil normal interrompu. Les programmes sont conserves.' }
+. (Join-Path $PSScriptRoot 'NormalProfile.ps1')
+Backup-LegacyPortableProfile $root
 $shell=New-Object -ComObject WScript.Shell
 foreach($folder in @([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Startup'))) {
     $shortcutPath=Join-Path $folder 'Web2API Continue.lnk'

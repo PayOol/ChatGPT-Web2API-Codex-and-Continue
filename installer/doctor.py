@@ -26,10 +26,14 @@ def examine(root: Path, offline=False):
     env = json.loads((root / "environment.json").read_text(encoding="utf-8"))
     os.environ.update(env)
     check("Managed installation identity", manifest.get("product") == "Web2API-Continue")
-    for name in ["user-data", "extensions", "shared-data"]:
-        check("Portable editor " + name, (root / "apps/vscode/data" / name).is_dir())
-    check("Continue in portable editor", Path(manifest["extension"]).parent.resolve()
-          == (root / "apps/vscode/data/extensions").resolve())
+    from normal_profile import paths
+    continue_dir, extensions_dir, data = paths()
+    check("Normal editor profile", manifest.get("profile_mode") == "normal"
+          and Path(manifest["vscode_user_data"]).resolve() == data)
+    check("Continue in normal profile", Path(manifest["continue_dir"]).resolve() == continue_dir
+          and Path(manifest["extension"]).parent.resolve() == extensions_dir)
+    check("Normal VS Code executable", Path(manifest["editor"]).is_file()
+          and not (Path(manifest["editor"]).parent / "data").exists())
     check("Continue managed profile resolver",
           (Path(manifest["extension"]) / "out/web2api-managed-environment.cjs").is_file())
     for name in [
@@ -38,7 +42,6 @@ def examine(root: Path, offline=False):
         "apps/node/node.exe",
         "apps/git/cmd/git.exe",
         "apps/rg/rg.exe",
-        "apps/vscode/Code.exe",
         "tools/local-capabilities/server.py",
         "tools/browser/continue_server.py",
         "tools/computer-use/continue_server.py",
@@ -58,7 +61,7 @@ def examine(root: Path, offline=False):
     )
     import yaml
 
-    config = yaml.safe_load((root / "continue/config.yaml").read_text(encoding="utf-8"))
+    config = yaml.safe_load((continue_dir / "config.yaml").read_text(encoding="utf-8"))
     servers = config.get("mcpServers", [])
     check(
         "Continue long generation wait",
@@ -100,15 +103,15 @@ def examine(root: Path, offline=False):
         check(
             "Continue patch " + relative, hashlib.sha256(path.read_bytes()).hexdigest() == expected
         )
-    flags = json.loads((root / "continue/full-access.local.json").read_text())
+    flags = json.loads((continue_dir / "full-access.local.json").read_text())
     check(
         "Automatic access active",
         flags.get("enabled") and flags.get("scope") == "all-configured-tools",
     )
-    flags = json.loads((root / "continue/auto-compaction.local.json").read_text())
+    flags = json.loads((continue_dir / "auto-compaction.local.json").read_text())
     check("Automatic compaction active", flags.get("enabled") and flags.get("threshold") == 0.75)
     with sqlite3.connect(
-        (root / "apps/vscode/data/user-data/User/globalStorage/state.vscdb").as_uri() + "?mode=ro", uri=True
+        (data / "User/globalStorage/state.vscdb").as_uri() + "?mode=ro", uri=True
     ) as conn:
         row = conn.execute(
             "SELECT value FROM ItemTable WHERE key='extensions.donotAutoUpdate'"

@@ -1,5 +1,5 @@
 {
-  "version": "0.3.3",
+  "version": "0.3.4",
   "platform": "win32-x64",
   "python": "3.14.3",
   "codex": "0.154.0",
@@ -24,10 +24,10 @@
       "file": "rg.zip"
     },
     "vscode": {
-      "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/7debcd0e2acdea1c52de81bf9ee1620444407dda/VSCode-win32-x64-1.138.0.zip",
-      "sha256": "c0a9f12a0d8962fa4cda1959eecd5fdd3f82de9715ad4dadd5601856bb60fd21",
+      "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/7debcd0e2acdea1c52de81bf9ee1620444407dda/VSCodeUserSetup-x64-1.138.0.exe",
+      "sha256": "820df7a601d0179fc850433e1a1c047d2926a7a5a78ef01cd49fe8833fa2010d",
       "version": "1.138.0",
-      "file": "vscode.zip"
+      "file": "vscode-user-setup.exe"
     },
     "node": {
       "url": "https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip",

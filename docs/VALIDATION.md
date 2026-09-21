@@ -1,4 +1,16 @@
-# Validation de la distribution 0.3.3
+# Validation de la distribution 0.3.4
+
+## Profil normal — 21 septembre 2026
+
+À la demande de l’utilisateur, 0.3.4 utilise le VS Code installé normalement et ses dossiers utilisateur habituels. Les correctifs et le modèle sont appliqués dans la configuration Continue normale. Les réglages VS Code sont laissés intacts ; les données de l’ancien profil portable sont archivées.
+
+Sur le PC utilisateur, le test exécuté dans le véritable éditeur a confirmé `profileMode: normal`, le modèle chargé et sélectionné pour chat/edit/apply, la bonne URL API et le chargement sans environnement du lanceur. La fenêtre normale « PrismCard — Visual Studio Code » a également été observée avec « ChatGPT Web2API » visible dans Continue. Le diagnostic des cinq serveurs MCP a réussi.
+
+Les régressions couvrent les chemins autorisés du profil normal, la préservation des réglages avec commentaires, la réparation, la conservation de modèles personnels ajoutés après installation, la restauration des fichiers d’extension, l’archivage de l’ancien profil et la résolution de l’environnement par liaison explicite.
+
+Le workflow sur Windows neuf installe ou réutilise le VS Code normal, installe Continue dans `.vscode/extensions`, puis lance le véritable éditeur sans paramètre de profil. Il exige le mode normal, l’absence de dossier portable près de l’éditeur, le modèle disponible et sa sélection dans les trois rôles. Les résultats distants et l’EXE effectivement installé sont conservés dans les artefacts du workflow.
+
+Les sections suivantes documentent les versions antérieures. Leurs chemins portables sont remplacés par les chemins normaux en 0.3.4.
 
 ## Profil portable et modèle Continue — 21 septembre 2026
 

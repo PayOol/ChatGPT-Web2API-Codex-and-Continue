@@ -1,6 +1,6 @@
 # ChatGPT Web2API + Continue
 
-L'environnement est installé. Le titre de cette fenêtre contient **Web2API Continue**. Continue est déjà installé et le modèle **ChatGPT Web2API** est configuré automatiquement. Le navigateur ChatGPT et cet éditeur utilisent les dossiers de cette installation. Une connexion GitHub n'est pas nécessaire pour utiliser ce modèle local.
+L'environnement utilise votre **VS Code habituel et son profil normal**. Continue est installé et le modèle **ChatGPT Web2API** est configuré automatiquement dans `%USERPROFILE%/.continue/config.yaml`. Une connexion GitHub n'est pas nécessaire pour utiliser ce modèle local.
 
 1. Connectez votre compte ChatGPT dans le navigateur qui vient de s'ouvrir. Cette connexion personnelle ne peut pas être distribuée dans un installateur.
 2. Ouvrez votre dossier de travail avec **Fichier > Ouvrir un dossier**, puis l'icône Continue dans la barre latérale.
@@ -12,8 +12,8 @@ La configuration inclut les correctifs de streaming, les appels d'outils, les im
 
 **Diagnostic.** `Doctor.cmd` vérifie les composants et les catalogues d'outils. Il distingue la présence des outils des connexions personnelles. `Repair.cmd` reconstruit la configuration et les correctifs après fermeture de cet éditeur. Les modifications des fichiers de configuration remplacés sont sauvegardées sous `backups`.
 
-**Lancement.** Le raccourci Bureau ouvre cet environnement. La passerelle démarre aussi à l'ouverture de session Windows. Le port API, choisi automatiquement, figure dans `installation.json` et `continue/config.yaml`.
+**Lancement.** Le raccourci Bureau ouvre cet environnement. La passerelle démarre aussi à l'ouverture de session Windows. Le port API, choisi automatiquement, figure dans `installation.json` et `%USERPROFILE%/.continue/config.yaml`.
 
 **Désinstallation.** `Uninstall.cmd` retire les programmes et raccourcis. Il conserve les configurations, sessions et profils personnels dans le dossier d'installation.
 
-Les mises à jour automatiques de cette copie de VS Code et de Continue sont désactivées pour conserver les correctifs compatibles. Utilisez une nouvelle version de cet installateur pour une mise à jour contrôlée.
+La mise à jour automatique de Continue est désactivée pour conserver les correctifs compatibles. Utilisez une nouvelle version de cet installateur pour une mise à jour contrôlée.

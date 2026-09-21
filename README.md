@@ -4,8 +4,8 @@ Distribution privée regroupant ChatGPT-Web2API, les correctifs de notre intégr
 
 ## Installer
 
-1. Depuis [la dernière version](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/latest), télécharger **Web2API-Continue-Setup-0.3.3.exe**.
-2. Lancer ce fichier. Il télécharge les dépendances, installe l'éditeur et l'extension, applique tous les correctifs, écrit la configuration, crée les raccourcis et démarre l'environnement.
+1. Depuis [la dernière version](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/latest), télécharger **Web2API-Continue-Setup-0.3.4.exe**.
+2. Enregistrer ses fichiers, fermer VS Code s’il est ouvert, puis lancer ce fichier. Il télécharge les dépendances, réutilise le VS Code habituel (ou installe VS Code normalement s’il est absent), installe l’extension, applique tous les correctifs, écrit la configuration, crée les raccourcis et démarre l'environnement.
 3. À la première ouverture, se connecter à **son propre compte ChatGPT** dans le navigateur dédié, puis ouvrir son dossier de travail dans VS Code et choisir le mode Agent de Continue.
 
 Windows x64 et une connexion Internet sont nécessaires. L'installation se fait dans `%LOCALAPPDATA%\Programs\Web2API-Continue`, sans installation globale de Python ou Node et sans droits administrateur. Prévoir plusieurs Go libres, notamment pour les téléchargements et les sauvegardes. Ce lancement automatise la préparation technique ; les connexions personnelles, les éventuels CAPTCHA et les autorisations Windows restent interactifs. L'exécutable n'est pas signé avec un certificat commercial ; Windows peut donc afficher un avertissement de provenance.
@@ -36,7 +36,7 @@ Le journal complet est écrit dans `%LOCALAPPDATA%\Programs\Web2API-Continue\log
 | Vision | Lecture d'images, registre local partagé et transmission des pixels à ChatGPT |
 | Connected | 9 outils de découverte, schémas, appels, patch natif, suivi PTY/événements, connexions et quotas via le vrai serveur Codex |
 | Services | Codex 0.154.0 et Hostinger MCP 1.63.2 ; catalogue des applications selon les connexions du compte ; 39 méthodes Codex décrites dans le catalogue embarqué |
-| Dépendances | Python 3.14.3, Node 24.14.0, Git portable, ripgrep, VS Code portable, Chromium, bibliothèques Python et npm verrouillées |
+| Dépendances | Python 3.14.3, Node 24.14.0, Git portable, ripgrep, VS Code habituel, Chromium, bibliothèques Python et npm verrouillées |
 | Maintenance | Lanceur, démarrage à l'ouverture de session, diagnostic, réparation avec sauvegardes, désinstallation conservant les données personnelles |
 
 Les 67 outils MCP directs complètent les outils natifs de Continue. Le catalogue connecté de la machine initiale comptait 651 fonctions ; ce nombre dépend des applications, comptes et droits de chaque utilisateur. Il ne constitue pas une garantie de disponibilité ni d'authentification sur un autre compte.
@@ -47,17 +47,19 @@ La conversation Agent passe par le navigateur ChatGPT connecté. Les comptes, co
 
 `Connect-Codex.cmd`, dans le dossier d'installation, ouvre la connexion du runtime Codex. Si Codex est déjà connecté sur le PC, la passerelle réutilise sa configuration et son authentification locales. Les apps doivent être connectées au compte concerné. Le serveur Hostinger fourni utilise son propre parcours OAuth lorsque nécessaire ; une configuration Hostinger existante est conservée. Les fonctions de génération explicites de Codex consomment son quota ; la recherche et l'appel direct aux outils n'invoquent pas un second modèle.
 
-L'accès automatique des outils est activé comme dans l'environnement d'origine. `continue/full-access.local.json` permet de le désactiver (`enabled: false`). Les règles installées demandent de respecter les instructions de l'utilisateur, le dossier de travail et les autorisations des applications. Les commandes et le contrôle Windows ont les droits de l'utilisateur connecté.
+L'accès automatique des outils est activé comme dans l'environnement d'origine. `%USERPROFILE%/.continue/full-access.local.json` permet de le désactiver (`enabled: false`). Les règles installées demandent de respecter les instructions de l'utilisateur, le dossier de travail et les autorisations des applications. Les commandes et le contrôle Windows ont les droits de l'utilisateur connecté.
 
-Chaque installation possède ses dossiers `continue`, `browser-profile`, `media`, `state`, `logs` et `backups`. Le profil, les extensions et le stockage partagé de son éditeur se trouvent dans `apps/vscode/data/{user-data,extensions,shared-data}`. Le VS Code habituel et sa configuration ne sont pas modifiés. Les ports libres sont choisis automatiquement au premier passage puis conservés ; les valeurs effectives figurent dans `installation.json`. L'API écoute sur `127.0.0.1`.
+La passerelle possède ses dossiers `browser-profile`, `media`, `state`, `logs` et `backups`. VS Code utilise son profil normal `%APPDATA%/Code`, ses extensions `%USERPROFILE%/.vscode/extensions` et Continue sa configuration `%USERPROFILE%/.continue/config.yaml`. Les réglages de l’éditeur, les autres extensions, les autres modèles et les serveurs d’outils non remplacés sont conservés. Les fichiers remplacés sont sauvegardés. Les ports libres sont choisis automatiquement au premier passage puis conservés ; les valeurs effectives figurent dans `installation.json`. L'API écoute sur `127.0.0.1`.
 
-## Continue et modèle disponibles automatiquement
+## Profil normal de VS Code
 
-La version 0.3.3 corrige la perte du profil au retour d’une connexion GitHub ou lors d’un lancement direct de `Code.exe`. L’éditeur utilise le [mode portable natif de VS Code](https://code.visualstudio.com/docs/setup/portable), et Continue retrouve la configuration de son installation même sans les variables du raccourci.
+La version 0.3.4 utilise **le VS Code habituel et son profil normal**. Le raccourci Web2API démarre la passerelle puis ouvre cet éditeur, avec ses réglages et ses extensions. Un lancement de VS Code depuis son icône habituelle retrouve aussi le modèle : Continue charge son environnement à partir d’une liaison locale vérifiée, sans dépendre du raccourci.
 
-Le titre de la fenêtre contient **Web2API Continue**. Dans cette fenêtre, Continue est déjà installé et **ChatGPT Web2API** est configuré pour les rôles chat, modification et application. Aucune installation manuelle de Continue ni connexion GitHub n’est nécessaire pour utiliser ce modèle local. Il faut seulement connecter son compte ChatGPT dans le navigateur dédié. Le VS Code habituel possède un profil distinct.
+Continue 2.0.0 reçoit automatiquement les correctifs, et **ChatGPT Web2API** est sélectionné pour chat, modification et application. Aucune installation manuelle de Continue ni connexion GitHub n’est nécessaire pour utiliser ce modèle local. Il faut connecter son compte ChatGPT dans le navigateur dédié.
 
-À la désinstallation, les profils de l’éditeur sont déplacés hors du dossier des programmes, vers `vscode-data` et `vscode-shared-data`, pour les conserver avec les autres données personnelles.
+Si VS Code est absent, l’installateur officiel pour l’utilisateur est téléchargé, vérifié par SHA-256 et exécuté automatiquement. S’il est déjà installé à son emplacement utilisateur ou système standard, il est réutilisé. Les préférences de mise à jour de VS Code ne sont pas modifiées ; l’exclusion de mise à jour automatique concerne uniquement Continue afin de préserver ses correctifs.
+
+Lors d’une mise à jour depuis 0.3.3, l’ancien profil portable est archivé sous `backups/portable-profile-*`. Son historique reste conservé ; il n’écrase pas le profil normal ni ses conversations. La désinstallation retire les entrées Web2API non modifiées et restaure les fichiers d’extension non modifiés depuis leur installation. Les modifications personnelles ultérieures sont conservées. Le VS Code habituel n’est pas désinstallé.
 
 ## Réflexions longues de ChatGPT
 
@@ -67,7 +69,7 @@ Une interruption dans Continue ou la fermeture du client annule l'observation et
 
 Dans `config.json`, `request_timeout: 0` et les cinq paramètres `detector_*_timeout_seconds: 0` signifient « sans limite ». Une valeur positive réactive volontairement la limite correspondante en secondes. Le délai total éventuel couvre les deux phases d'attente sans repartir à zéro à l'apparition du message. Dans la configuration Continue installée, `requestOptions.timeout: 0` active l'attente sans minuteur du correctif local.
 
-Pour mettre à jour une installation 0.3.0, 0.3.1 ou 0.3.2, fermer son éditeur puis lancer l’installateur 0.3.3 sur le même dossier. Les anciens dossiers gérés `vscode-data` et `extensions` sont migrés dans le profil portable. Deux profils existants ne sont jamais fusionnés silencieusement. Les configurations remplacées sont sauvegardées et les comptes/profils sont conservés. Si le correctif est appliqué à une extension déjà chargée, recharger sa fenêtre VS Code pour charger le nouveau code.
+Pour mettre à jour une version précédente, enregistrer ses fichiers, fermer toutes les fenêtres VS Code puis lancer l’installateur 0.3.4 sur le même dossier. Les configurations remplacées sont sauvegardées et le navigateur ChatGPT conserve son compte connecté.
 
 ## Maintenance et développement
 
@@ -75,7 +77,7 @@ Pour mettre à jour une installation 0.3.0, 0.3.1 ou 0.3.2, fermer son éditeur 
 - `Doctor.cmd` contrôle les fichiers, correctifs, réglages et les cinq catalogues MCP. Une présence au catalogue n'est pas une preuve de réussite d'une action distante.
 - `Repair.cmd` réinstalle les composants et réapplique la configuration. Fermer le VS Code de cette installation avant réparation. Les fichiers modifiés remplacés sont sauvegardés sous `backups`.
 - `Uninstall.cmd` retire les composants et raccourcis, après fermeture de l'éditeur, tout en conservant les profils, historiques, configurations, médias, journaux et sauvegardes.
-- Les mises à jour automatiques de cette copie de VS Code et de Continue sont désactivées : une nouvelle version de la distribution doit valider et adapter les correctifs.
+- La mise à jour automatique de Continue est désactivée : une nouvelle version de la distribution doit valider et adapter les correctifs.
 
 Pour construire l'exécutable sous Windows : `python installer/build_release.py --output dist`. Le compilateur .NET Framework de Windows crée un lanceur avec l'archive source embarquée ; le lanceur vérifie son empreinte avant extraction. Les exécutables téléchargés sont vérifiés par SHA-256, les paquets Python par leurs verrous avec empreintes et npm par `npm ci`. Le fichier `installer/dependencies.json` décrit les versions fixées. Les sources de correctifs Continue sont dans `integration/continue`.
 

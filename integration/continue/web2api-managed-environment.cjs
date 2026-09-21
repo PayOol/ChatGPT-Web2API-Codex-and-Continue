@@ -4,8 +4,10 @@ const path = require("path");
 
 exports.load = function (extensionOutput) {
   extensionOutput = fs.realpathSync(extensionOutput);
-  let root = extensionOutput;
-  for (let depth = 0; depth < 8; depth++) {
+  const bindingPath = path.join(extensionOutput, "web2api-installation.json");
+  const binding = fs.existsSync(bindingPath) ? JSON.parse(fs.readFileSync(bindingPath, "utf8")) : null;
+  let root = binding ? binding.root : extensionOutput;
+  for (let depth = 0; !binding && depth < 8; depth++) {
     if (fs.existsSync(path.join(root, "installation.json"))) break;
     root = path.dirname(root);
   }
@@ -31,6 +33,6 @@ exports.load = function (extensionOutput) {
   process.env.PATH = [...managedPaths, ...inheritedPaths].join(path.delimiter);
   process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(root, "browsers");
   // A direct EXE, pinned taskbar icon or OAuth callback has no launcher environment.
-  process.env.CONTINUE_GLOBAL_DIR = path.join(root, "continue");
+  process.env.CONTINUE_GLOBAL_DIR = manifest.continue_dir || path.join(root, "continue");
   return process.env.CONTINUE_GLOBAL_DIR;
 };

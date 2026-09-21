@@ -1,4 +1,4 @@
-"""Configure the managed Windows distribution. Never edits the user's normal VS Code profile."""
+"""Configure the managed Windows distribution. Integrates with the user's normal VS Code profile."""
 
 from __future__ import annotations
 import argparse
@@ -11,7 +11,9 @@ import socket
 import sqlite3
 import time
 
-VERSION = "0.3.3"
+import normal_profile
+
+VERSION = "0.3.4"
 
 
 def write_changed(path: Path, data: bytes, backup: Path):
@@ -95,24 +97,37 @@ def apply_continue_patches(extension: Path, source: Path, backup: Path):
     }
 
 
-def configure(root: Path, source: Path, extension: Path, browser: Path):
+def configure(root: Path, source: Path, extension: Path, browser: Path, editor: Path):
     root = root.resolve()
     source = source.resolve()
     extension = extension.resolve()
     browser = browser.resolve()
+    editor = editor.resolve()
+    continue_dir, extensions_dir, data = normal_profile.paths()
     marker = root / "installation.json"
     old = read_json(marker)
     if old and old.get("product") != "Web2API-Continue":
         raise RuntimeError("Installation directory belongs to another product.")
-    if not extension.is_relative_to(root):
-        raise ValueError("Only the extension in the managed installation may be patched.")
+    if extension.parent != extensions_dir or not extension.name.startswith("continue.continue-"):
+        raise ValueError("Only Continue in the normal user extension directory may be patched.")
+    if not editor.is_file() or (editor.parent / "data").exists():
+        raise ValueError("A normal VS Code editor without a portable data directory is required.")
     backup = root / "backups" / time.strftime("%Y%m%d-%H%M%S")
     print("Configuration : sauvegardes et correctifs d'acces, compaction et attente longue", flush=True)
+    normal_targets = [extension / relative for relative in [
+        "out/extension.js", "gui/assets/index.js", "out/continue-full-access.local.cjs",
+        "out/continue-auto-compaction.local.cjs", "out/continue-long-wait.local.cjs",
+        "out/web2api-managed-environment.cjs", "out/web2api-installation.json",
+    ]] + [continue_dir / relative for relative in [
+        "config.yaml", "full-access.local.json", "auto-compaction.local.json",
+        "rules/local-agent-tools.md", "index/globalContext.json",
+    ]]
+    normal_profile.snapshot(root, extension, normal_targets)
     patch_hashes = apply_continue_patches(extension, source, backup)
+    write_json(extension / "out/web2api-installation.json", {"root": str(root)}, backup)
     port = old.get("api_port") or available_port(8080)
     cdp = old.get("cdp_port") or available_port(9222, avoid=(port,))
     print(f"Configuration : ports API {port}, navigateur {cdp}", flush=True)
-    continue_dir = root / "continue"
     state_dir = root / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     node = root / "apps/node/node.exe"
@@ -157,7 +172,9 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
     config = config or {}
     if not isinstance(config, dict):
         raise ValueError("Continue config must be an object; restore its backup before repairing.")
-    config.update(name="ChatGPT Web local", version="1.0.0", schema="v1")
+    config.setdefault("name", "Main Config")
+    config.setdefault("version", "1.0.0")
+    config.setdefault("schema", "v1")
     model = {
         "name": "ChatGPT Web2API",
         "provider": "openai",
@@ -232,20 +249,8 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
         (source / "integration/continue/local-agent-tools.md").read_bytes(),
         backup,
     )
-    data = root / "apps/vscode/data/user-data"
-    print("Configuration : profil VS Code, regles et protection des versions", flush=True)
-    settings_path = data / "User/settings.json"
-    settings = read_json(settings_path)
-    settings.update(
-        {
-            "continue.enableTabAutocomplete": False,
-            "continue.enableNextEdit": False,
-            "update.mode": "none",
-            "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}Web2API Continue",
-            "workbench.startupEditor": "none",
-        }
-    )
-    write_json(settings_path, settings, backup)
+    # Keep the normal editor settings, window title and update preferences untouched.
+    print("Configuration : profil normal VS Code et protection de Continue", flush=True)
     db = data / "User/globalStorage/state.vscdb"
     db.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db, timeout=5) as conn:
@@ -256,7 +261,8 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
             "SELECT value FROM ItemTable WHERE key='extensions.donotAutoUpdate'"
         ).fetchone()
         values = json.loads(row[0]) if row else []
-        if "continue.continue" not in values:
+        disabled_updates_before = "continue.continue" in values
+        if not disabled_updates_before:
             values.append("continue.continue")
         conn.execute(
             "INSERT OR REPLACE INTO ItemTable(key,value) VALUES (?,?)",
@@ -295,6 +301,11 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
         "api_port": port,
         "cdp_port": cdp,
         "extension": str(extension),
+        "profile_mode": "normal",
+        "continue_dir": str(continue_dir),
+        "editor": str(editor),
+        "vscode_user_data": str(data),
+        "extensions_dir": str(extensions_dir),
         "browser": str(browser),
         "codex": str(codex),
         "source": str(source),
@@ -303,17 +314,18 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     write_json(marker, manifest, backup)
+    normal_profile.record(root, normal_targets, [model], servers, disabled_updates_before)
     return manifest
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    for arg in ["root", "source", "extension", "browser"]:
+    for arg in ["root", "source", "extension", "browser", "editor"]:
         parser.add_argument("--" + arg, required=True, type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
-            configure(args.root, args.source, args.extension, args.browser),
+            configure(args.root, args.source, args.extension, args.browser, args.editor),
             ensure_ascii=False,
             indent=2,
         )

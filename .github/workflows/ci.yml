@@ -80,4 +80,4 @@ jobs:
           path: |
             ${{ runner.temp }}/Web2API test/logs/install.log
             ${{ runner.temp }}/Web2API test/logs/editor-runtime.json
-            ${{ runner.temp }}/Web2API test/apps/vscode/data/user-data/logs/**
+            C:/Users/runneradmin/AppData/Roaming/Code/logs/**

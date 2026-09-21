@@ -1,4 +1,4 @@
-"""Portable editor profiles must survive direct launches and uninstall."""
+"""Normal profile binding and archival of the previous portable profile."""
 import json
 import os
 import shutil
@@ -23,69 +23,71 @@ def q(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def test_portable_migration_preserves_user_data_on_uninstall(tmp_path):
-    root = tmp_path / "managed with spaces"
-    for relative in ["vscode-data", "extensions", "vscode-shared-data"]:
-        (root / relative).mkdir(parents=True)
-        (root / relative / "old.txt").write_text(relative)
-    script = tmp_path / "portable.ps1"
+def test_launcher_removes_foreign_editor_flags(tmp_path):
+    shutil.copy2(ROOT / "installer/Environment.ps1", tmp_path / "Environment.ps1")
+    (tmp_path / "environment.json").write_text("{}")
+    (tmp_path / "installation.json").write_text("{}")
+    script = tmp_path / "run.ps1"
     script.write_text(f"""
-$ErrorActionPreference='Stop'
-. {q(ROOT / 'installer/Portable.ps1')}
-Set-PortableEditor {q(root)}
-Set-PortableEditor {q(root)}
-Set-Content -LiteralPath {q(root / 'apps/vscode/data/user-data/personal.txt')} -Value 'keep'
-Set-Content -LiteralPath {q(root / 'apps/vscode/data/shared-data/personal.txt')} -Value 'shared'
-Save-PortableEditorData {q(root)}
+$env:ELECTRON_RUN_AS_NODE='1'
+$env:VSCODE_PORTABLE='foreign'
+$env:VSCODE_IPC_HOOK_CLI='foreign'
+. {q(tmp_path / 'Environment.ps1')}
+foreach ($key in @('ELECTRON_RUN_AS_NODE','VSCODE_PORTABLE','VSCODE_IPC_HOOK_CLI')) {{
+    if (Test-Path ('Env:\\'+$key)) {{ throw "Flag still present: $key" }}
+}}
 """)
     p = run_ps(script)
     assert p.returncode == 0, p.stdout + p.stderr
-    assert (root / "vscode-data/personal.txt").read_text().strip() == "keep"
-    assert (root / "vscode-shared-data/personal.txt").read_text().strip() == "shared"
-    assert not (root / "apps/vscode/data/user-data").exists()
-    assert (root / "vscode-data/old.txt").read_text() == "vscode-data"
-    assert (root / "apps/vscode/data/extensions/old.txt").read_text() == "extensions"
-    assert (root / "vscode-shared-data/old.txt").read_text() == "vscode-shared-data"
-    # Reinstall restores the saved profile into the same portable location.
-    script.write_text(f". {q(ROOT / 'installer/Portable.ps1')}\nSet-PortableEditor {q(root)}")
-    assert run_ps(script).returncode == 0
-    assert (root / "apps/vscode/data/user-data/personal.txt").read_text().strip() == "keep"
 
 
-def test_portable_refuses_to_merge_two_profiles(tmp_path):
-    root = tmp_path / "managed"
+def test_only_active_normal_continue_extension_is_selected(tmp_path):
+    extensions = tmp_path / "extensions"
+    current = extensions / "continue.continue-2.0.0-win32-x64"
+    stale = extensions / "continue.continue-2.0.0"
+    for folder in (current, stale):
+        folder.mkdir(parents=True)
+        (folder / "package.json").write_text('{"version":"2.0.0"}')
+    (extensions / "extensions.json").write_text(json.dumps([
+        {"identifier": {"id": "continue.continue"}, "version": "2.0.0", "relativeLocation": current.name}
+    ]))
+    script = tmp_path / "run.ps1"
+    script.write_text(f". {q(ROOT / 'installer/NormalProfile.ps1')}\n(Find-NormalContinue {q(extensions)}).FullName")
+    p = run_ps(script)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert Path(p.stdout.strip()) == current
+
+
+def test_old_portable_profile_is_archived_without_replacing_normal_profile(tmp_path):
+    root = tmp_path / "managed with spaces"
     folder = root / "apps/vscode/data/user-data"
     folder.mkdir(parents=True)
-    marker = folder / "personal.txt"
-    marker.write_text("keep")
-    (root / "vscode-data").mkdir()
-    script = tmp_path / "portable.ps1"
-    script.write_text(f"""
-$ErrorActionPreference='Stop'
-. {q(ROOT / 'installer/Portable.ps1')}
-Set-PortableEditor {q(root)}
-""")
+    (folder / "personal.txt").write_text("keep")
+    script = tmp_path / "archive.ps1"
+    script.write_text(f". {q(ROOT / 'installer/NormalProfile.ps1')}\nBackup-LegacyPortableProfile {q(root)}\nBackup-LegacyPortableProfile {q(root)}")
     p = run_ps(script)
-    assert p.returncode != 0
-    assert marker.read_text() == "keep"
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert not (root / "apps/vscode/data").exists()
+    backups = list((root / "backups").glob("portable-profile-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "user-data/personal.txt").read_text() == "keep"
 
 
-def test_managed_resolver_works_without_launcher_in_portable_directory(tmp_path):
+def test_normal_resolver_works_without_launcher(tmp_path):
     node = shutil.which("node")
     if not node:
         pytest.skip("Node unavailable")
     root = tmp_path / "managed"
-    extension = root / "apps/vscode/data/extensions/continue.continue-2.0.0"
+    root.mkdir()
+    continue_dir = tmp_path / "user/.continue"
+    extension = tmp_path / "user/.vscode/extensions/continue.continue-2.0.0"
     output = extension / "out"
     output.mkdir(parents=True)
     (root / "installation.json").write_text(json.dumps({
-        "product": "Web2API-Continue", "root": str(root), "extension": str(extension)
+        "product": "Web2API-Continue", "root": str(root), "extension": str(extension), "continue_dir": str(continue_dir)
     }))
     (root / "environment.json").write_text(json.dumps({"W2A_API_BASE": "http://127.0.0.1:8080/v1"}))
-    script = tmp_path / "portable.ps1"
-    script.write_text(f". {q(ROOT / 'installer/Portable.ps1')}\nSet-PortableEditor {q(root)}")
-    p = run_ps(script)
-    assert p.returncode == 0, p.stdout + p.stderr
+    (output / "web2api-installation.json").write_text(json.dumps({"root": str(root)}))
     js = tmp_path / "check.cjs"
     js.write_text("""
 const {load} = require(process.argv[2]);
@@ -96,17 +98,14 @@ load(process.argv[3]);
 console.log(JSON.stringify({result, env:process.env.CONTINUE_GLOBAL_DIR, api:process.env.W2A_API_BASE,
   firstPath, secondPath:process.env.PATH}));
 """)
-    linked_output = root / "apps/vscode/data/extensions/continue.continue-2.0.0/out"
     p = subprocess.run([node, str(js), str(ROOT / "integration/continue/web2api-managed-environment.cjs"),
-                        str(linked_output)], capture_output=True, text=True, check=True)
+                        str(output)], capture_output=True, text=True, check=True)
     result = json.loads(p.stdout)
-    assert Path(result["result"]) == root / "continue"
+    assert Path(result["result"]) == continue_dir
     assert result["env"] == result["result"]
     assert result["api"] == "http://127.0.0.1:8080/v1"
     assert result["firstPath"] == result["secondPath"]
     assert Path(result["firstPath"].split(os.pathsep)[0]) == root / "apps/node"
-    script.write_text(f". {q(ROOT / 'installer/Portable.ps1')}\nSave-PortableEditorData {q(root)}")
-    assert run_ps(script).returncode == 0
 
 
 def test_managed_resolver_does_not_change_foreign_extension(tmp_path):

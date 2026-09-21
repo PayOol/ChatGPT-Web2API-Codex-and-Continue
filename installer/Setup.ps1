@@ -2,7 +2,7 @@ param([string]$InstallRoot = "$env:LOCALAPPDATA\Programs\Web2API-Continue", [str
 $ErrorActionPreference = 'Stop'
 $ProgressPreference='SilentlyContinue'
 foreach ($name in @('VSCODE_IPC_HOOK_CLI','VSCODE_PORTABLE','ELECTRON_RUN_AS_NODE')) {
-    [Environment]::SetEnvironmentVariable($name,$null,'Process')
+    Remove-Item -LiteralPath ('Env:\'+$name) -ErrorAction SilentlyContinue
 }
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -32,8 +32,8 @@ try {
     Write-InstallStatus ('Journal detaille : '+$InstallRoot+'\logs\install.log')
     Write-InstallStatus 'Progression globale : 21 etapes. Le pourcentage compte les etapes, pas le temps restant.'
     Start-InstallStep 'Preparation et controle de l''installation'
-    $editors=@(Get-CimInstance Win32_Process -Filter "Name = 'Code.exe'" | Where-Object { $_.ExecutablePath -eq (Join-Path $InstallRoot 'apps\vscode\Code.exe') })
-    if ($editors.Count) { throw 'Fermer le VS Code de cette installation avant de reparer.' }
+    $editors=@(Get-CimInstance Win32_Process -Filter "Name = 'Code.exe'")
+    if ($editors.Count) { throw 'Enregistrer les fichiers et fermer VS Code avant installation dans le profil normal, puis relancer cet EXE.' }
     if (Test-Path -LiteralPath (Join-Path $InstallRoot 'Stop.ps1')) { & (Join-Path $InstallRoot 'Stop.ps1') }
     Start-InstallStep ('Gestionnaire Python uv '+$dependencies.downloads.uv.version)
     Expand-Verified 'uv' (Join-Path $InstallRoot 'apps\uv') 'uv.exe'
@@ -44,10 +44,17 @@ try {
     Start-InstallStep ('Recherche ripgrep '+$dependencies.downloads.rg.version)
     Expand-Verified 'rg' (Join-Path $InstallRoot 'apps\rg') 'rg.exe' -Flatten
     Start-InstallStep ('Editeur VS Code '+$dependencies.downloads.vscode.version)
-    Expand-Verified 'vscode' (Join-Path $InstallRoot 'apps\vscode') 'Code.exe'
-    . (Join-Path $PSScriptRoot 'Portable.ps1')
-    Set-PortableEditor $InstallRoot
-    Write-InstallStatus 'Profil portable active : extensions, reglages et stockage isoles meme lors des retours de connexion.'
+    . (Join-Path $PSScriptRoot 'NormalProfile.ps1')
+    $editor=Find-NormalEditor
+    if (-not $editor) {
+        $setup=Get-VerifiedDownload 'vscode'
+        Invoke-Checked $setup @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/MERGETASKS=!runcode') -Label 'Installation normale de VS Code pour cet utilisateur'
+        $editor=Find-NormalEditor
+    }
+    if (-not $editor) { throw 'VS Code normal introuvable apres installation.' }
+    $editorCli=Join-Path (Split-Path $editor) 'bin\code.cmd'
+    Write-InstallStatus ('VS Code habituel : '+$editor)
+    Write-InstallStatus ('Profil normal : '+$env:APPDATA+'\Code ; extensions : '+$env:USERPROFILE+'\.vscode\extensions')
     Start-InstallStep ('Python '+$dependencies.python+' et ses deux environnements')
     $uv=Join-Path $InstallRoot 'apps\uv\uv.exe'
     $node=Join-Path $InstallRoot 'apps\node\node.exe'
@@ -98,21 +105,22 @@ try {
     $browser=Get-ChildItem -LiteralPath $env:PLAYWRIGHT_BROWSERS_PATH -Filter chrome.exe -Recurse | Where-Object { $_.FullName -notlike '*headless*' } | Select-Object -First 1
     if (-not $browser) { throw 'Navigateur Chromium absent.' }
     Start-InstallStep 'Extension Continue 2.0.0'
-    $extensions=Join-Path $InstallRoot 'apps\vscode\data\extensions'
-    $extension=Get-ChildItem -LiteralPath $extensions -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('continue.continue-2.0.0-win32-x64','continue.continue-2.0.0') } | Select-Object -First 1
+    $extensions=Join-Path $env:USERPROFILE '.vscode\extensions'
+    $extension=Find-NormalContinue $extensions
     if (-not $extension) {
         $vsix=Get-VerifiedDownload 'continue'
-        Invoke-Checked (Join-Path $InstallRoot 'apps\vscode\bin\code.cmd') @('--install-extension',$vsix,'--force') -Label 'Installation de l''extension Continue'
-        $extension=Get-ChildItem -LiteralPath $extensions -Directory | Where-Object { $_.Name -in @('continue.continue-2.0.0-win32-x64','continue.continue-2.0.0') } | Select-Object -First 1
+        Invoke-Checked $editorCli @('--install-extension',$vsix,'--force') -Label 'Installation de l''extension Continue'
+        $extension=Find-NormalContinue $extensions
     } else { Write-InstallStatus 'Extension Continue deja installee : reutilisation' }
     if (-not $extension) { throw 'Extension Continue 2.0.0 absente.' }
     Start-InstallStep 'Correctifs Continue et configuration des outils'
-    Invoke-Checked $python @((Join-Path $app 'installer\configure.py'),'--root',$InstallRoot,'--source',$app,'--extension',$extension.FullName,'--browser',$browser.FullName) -Label 'Correctifs, profils et configuration'
+    Invoke-Checked $python @((Join-Path $app 'installer\configure.py'),'--root',$InstallRoot,'--source',$app,'--extension',$extension.FullName,'--browser',$browser.FullName,'--editor',$editor) -Label 'Correctifs, profils et configuration'
     Start-InstallStep 'Installation des lanceurs et de la maintenance'
-    foreach ($name in @('Environment.ps1','Portable.ps1','Start.ps1','Start.cmd','Stop.ps1','Doctor.ps1','Doctor.cmd','Repair.cmd','Connect-Codex.cmd','Uninstall.ps1','Uninstall.cmd')) {
+    foreach ($name in @('Environment.ps1','NormalProfile.ps1','Start.ps1','Start.cmd','Stop.ps1','Doctor.ps1','Doctor.cmd','Repair.cmd','Connect-Codex.cmd','Uninstall.ps1','Uninstall.cmd')) {
         Write-InstallStatus ('Lanceur : '+$name)
         Copy-Item -LiteralPath (Join-Path $app ('installer\'+$name)) -Destination $InstallRoot -Force
     }
+    Backup-LegacyPortableProfile $InstallRoot
     Start-InstallStep 'Verification finale de l''installation'
     Invoke-Checked $python @((Join-Path $app 'installer\doctor.py'),'--root',$InstallRoot,'--offline') -Label 'Diagnostic des fichiers, correctifs et reglages'
     Start-InstallStep 'Raccourcis et demarrage automatique'
@@ -124,7 +132,7 @@ try {
             $shortcut.Arguments='-NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $InstallRoot 'Start.ps1')+'"'
             if ($folder -eq [Environment]::GetFolderPath('Startup')) { $shortcut.Arguments+=' -ServiceOnly' }
             $shortcut.WorkingDirectory=$InstallRoot
-            $shortcut.IconLocation=(Join-Path $InstallRoot 'apps\vscode\Code.exe')+',0'
+            $shortcut.IconLocation=$editor+',0'
             $shortcut.WindowStyle=7
             $shortcut.Save()
             Write-InstallStatus ('Raccourci cree : '+$folder)
