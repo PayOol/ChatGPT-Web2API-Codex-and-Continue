@@ -59,13 +59,22 @@ function Receive-InstallDownload([string]$Url,[string]$Path,[string]$Label) {
 function Get-VerifiedDownload([string]$Name) {
     $entry=$dependencies.downloads.$Name
     $file=Join-Path $CacheDirectory $entry.file
-    if (Test-Path -LiteralPath $file) {
-        Write-InstallStatus ('Verification SHA256 du cache : '+$Name)
-        if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -eq $entry.sha256) {
-            Write-InstallStatus ('Cache valide, telechargement evite : '+$Name)
-            return $file
+    $candidates=@($file)
+    if ($script:SiblingInstallRoot) {
+        $shared=Join-Path $script:SiblingInstallRoot ('cache\'+$entry.file)
+        if ([IO.Path]::GetFullPath($shared) -ne [IO.Path]::GetFullPath($file)) { $candidates+=$shared }
+    }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $origin=if ([IO.Path]::GetFullPath($candidate) -eq [IO.Path]::GetFullPath($file)) { 'du cache' } else { 'de l''autre cible' }
+            Write-InstallStatus ('Verification SHA256 '+$origin+' : '+$Name)
+            if ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant() -eq $entry.sha256) {
+                if ($origin -eq 'du cache') { Write-InstallStatus ('Cache valide, telechargement evite : '+$Name) }
+                else { Write-InstallStatus ('Archive valide '+$origin+', telechargement evite : '+$Name) }
+                return $candidate
+            }
+            Write-InstallStatus ('Archive invalide '+$origin+', elle ne sera pas utilisee : '+$Name)
         }
-        Write-InstallStatus ('Cache invalide, nouveau telechargement : '+$Name)
     }
     $partial=$file+'.partial'
     for ($attempt=1;$attempt -le 3;$attempt++) {

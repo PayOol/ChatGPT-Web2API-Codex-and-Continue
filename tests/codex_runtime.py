@@ -38,7 +38,7 @@ async def verify(binary: Path):
             1,
             "initialize",
             {
-                "clientInfo": {"name": "web2api-model-check", "version": "0.4.5"},
+                "clientInfo": {"name": "web2api-model-check", "version": "0.4.6"},
                 "capabilities": {"experimentalApi": True},
             },
         )

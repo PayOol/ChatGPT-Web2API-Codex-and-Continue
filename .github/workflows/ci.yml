@@ -104,19 +104,43 @@ jobs:
         shell: powershell
         run: |
           $exe=(Get-ChildItem dist\Web2API-Continue-Setup-*.exe).FullName
-          & $exe --target codex --root "$env:RUNNER_TEMP\Web2API Codex test" --no-launch --no-shortcuts --skip-desktop
+          & $exe --target codex --root "$env:RUNNER_TEMP\Programs\Web2API-Codex" --no-launch --no-shortcuts --skip-desktop
           if ($LASTEXITCODE -ne 0) { throw 'Codex target installation failed' }
       - name: Verify the model in the real Codex App Server
-        run: python tests/codex_runtime.py --root "${{ runner.temp }}/Web2API Codex test"
+        run: python tests/codex_runtime.py --root "${{ runner.temp }}/Programs/Web2API-Codex"
       - name: Verify selective removal
         shell: powershell
         run: |
-          $root="$env:RUNNER_TEMP\Web2API Codex test"
+          $root="$env:RUNNER_TEMP\Programs\Web2API-Codex"
           & "$root\venv\Scripts\python.exe" "$root\app\installer\configure_codex.py" --root $root --detach
           if ($LASTEXITCODE -ne 0) { throw 'Selective Codex removal failed' }
+      - name: Install Continue beside Codex and verify cross-target reuse
+        shell: powershell
+        run: |
+          $exe=(Get-ChildItem dist\Web2API-Continue-Setup-*.exe).FullName
+          $root="$env:RUNNER_TEMP\Programs\Web2API-Continue"
+          & $exe --target continue --root $root --no-launch --no-shortcuts
+          if ($LASTEXITCODE -ne 0) { throw 'Continue target installation failed after Codex' }
+          $log=Get-Content "$root\logs\install.log" -Raw
+          foreach ($proof in @("Archive valide de l'autre cible, telechargement evite",'Cache Python commun verifie et reutilise','Chromium Playwright compatible trouve dans l''autre cible')) {
+            if ($log -notlike ('*'+$proof+'*')) { throw ('Missing cross-target reuse proof: '+$proof) }
+          }
+          if ($log -like '*Downloading Chrome for Testing*') { throw 'Continue downloaded Chromium despite a compatible Codex browser' }
+      - name: Retry Continue and verify installed dependencies are skipped
+        shell: powershell
+        run: |
+          $exe=(Get-ChildItem dist\Web2API-Continue-Setup-*.exe).FullName
+          $root="$env:RUNNER_TEMP\Programs\Web2API-Continue"
+          & $exe --target continue --root $root --no-launch --no-shortcuts
+          if ($LASTEXITCODE -ne 0) { throw 'Continue retry failed' }
+          $log=Get-Content "$root\logs\install.log" -Raw
+          foreach ($proof in @('Dependances Python deja conformes, installation ignoree','Dependances npm deja conformes, installation ignoree','Navigateur Chromium deja conforme, installation ignoree','Extension Continue deja installee : reutilisation')) {
+            if ($log -notlike ('*'+$proof+'*')) { throw ('Missing retry proof: '+$proof) }
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Codex-installation-proof
           path: |
-            ${{ runner.temp }}/Web2API Codex test/logs/**
+            ${{ runner.temp }}/Programs/Web2API-Codex/logs/**
+            ${{ runner.temp }}/Programs/Web2API-Continue/logs/**

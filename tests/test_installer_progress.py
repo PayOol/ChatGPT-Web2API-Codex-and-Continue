@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -45,6 +46,24 @@ def run_ps(tmp_path, body, timeout=30):
         env=environment,
     )
     return result, transcript
+
+
+def run_reuse_ps(tmp_path, body, timeout=30):
+    script = tmp_path / "reuse test.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)\n"
+        f". {ps_quote(ROOT / 'installer/Progress.ps1')}\n"
+        f". {ps_quote(ROOT / 'installer/Reuse.ps1')}\n"
+        + body,
+        encoding="utf-8-sig",
+    )
+    environment = {key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"}
+    return subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(script)], capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=timeout, env=environment,
+    )
 
 
 @pytest.fixture
@@ -143,6 +162,151 @@ Get-VerifiedDownload 'fixture'
     assert result.returncode != 0
     assert "SHA256 incorrecte" in result.stderr
     assert not (tmp_path / "bad.zip").exists()
+
+
+def test_verified_archive_is_reused_from_sibling_without_network(tmp_path, archive):
+    own = tmp_path / "Web2API-Continue"
+    sibling = tmp_path / "Web2API-Codex"
+    own.mkdir()
+    (sibling / "cache").mkdir(parents=True)
+    cached = sibling / "cache/fixture.zip"
+    cached.write_bytes(archive)
+    digest = hashlib.sha256(archive).hexdigest()
+    body = f"""
+$InstallRoot={ps_quote(own)}
+$CacheDirectory={ps_quote(own / 'cache')}
+New-Item -ItemType Directory -Path $CacheDirectory | Out-Null
+$script:SiblingInstallRoot={ps_quote(sibling)}
+$dependencies=@{{downloads=@{{fixture=@{{url='http://127.0.0.1:1/must-not-run';file='fixture.zip';version='1';sha256='{digest}'}}}}}}
+$file=Get-VerifiedDownload 'fixture'
+if ($file -ne {ps_quote(cached)}) {{ throw 'Sibling archive was not selected' }}
+"""
+    result, _ = run_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "de l'autre cible" in result.stdout
+    assert "telechargement evite" in result.stdout
+
+
+def test_sibling_installation_requires_exact_owned_manifest(tmp_path):
+    current = tmp_path / "Web2API-Continue"
+    sibling = tmp_path / "Web2API-Codex"
+    current.mkdir()
+    sibling.mkdir()
+    valid = {"product": "Web2API-Continue", "installation_target": "codex", "root": str(sibling)}
+    (sibling / "installation.json").write_text(json.dumps(valid))
+    isolated_local = tmp_path / "isolated-local"
+    body = f"""
+$env:LOCALAPPDATA={ps_quote(isolated_local)}
+$found=Get-CompatibleSiblingInstallation {ps_quote(current)} 'continue'
+if ($found -ne {ps_quote(sibling)}) {{ throw 'Valid sibling was not found' }}
+"""
+    result = run_reuse_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    valid["root"] = str(tmp_path / "foreign")
+    (sibling / "installation.json").write_text(json.dumps(valid))
+    result = run_reuse_ps(tmp_path, f"$env:LOCALAPPDATA={ps_quote(isolated_local)}\nif ($null -ne (Get-CompatibleSiblingInstallation {ps_quote(current)} 'continue')) {{ throw 'Foreign marker accepted' }}")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_python_requirements_are_skipped_only_after_live_verification(tmp_path):
+    requirements = tmp_path / "requirements.lock"
+    requirements.write_text("pip==" + subprocess.check_output(
+        [sys.executable, "-c", "import importlib.metadata as m;print(m.version('pip'))"], text=True
+    ).strip() + "\n")
+    result = run_reuse_ps(tmp_path, f"if (-not (Test-PythonRequirements {ps_quote(sys.executable)} {ps_quote(requirements)})) {{ throw 'Installed package rejected' }}")
+    assert result.returncode == 0, result.stdout + result.stderr
+    requirements.write_text("pip==0.0.invalid\n")
+    result = run_reuse_ps(tmp_path, f"if (Test-PythonRequirements {ps_quote(sys.executable)} {ps_quote(requirements)}) {{ throw 'Version drift accepted' }}")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_python_requirement_install_step_adopts_then_skips_verified_environment(tmp_path):
+    requirements = tmp_path / "requirements.lock"
+    requirements.write_text("pip==" + subprocess.check_output(
+        [sys.executable, "-c", "import importlib.metadata as m;print(m.version('pip'))"], text=True
+    ).strip() + "\n")
+    environment = tmp_path / "venv"
+    scripts = environment / "Scripts"
+    scripts.mkdir(parents=True)
+    python = scripts / "python.cmd"
+    python.write_text(f'@echo off\n"{sys.executable}" %*\n')
+    receipt = environment / ".web2api-test-requirements-sha256"
+    body = f"""
+Install-PythonRequirements 'missing-uv.exe' {ps_quote(python)} {ps_quote(requirements)} '.web2api-test-requirements-sha256' 'Fixture Python'
+Install-PythonRequirements 'missing-uv.exe' {ps_quote(python)} {ps_quote(requirements)} '.web2api-test-requirements-sha256' 'Fixture Python'
+"""
+    result = run_reuse_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "existantes verifiees et adoptees" in result.stdout
+    assert "deja conformes, installation ignoree" in result.stdout
+    assert receipt.read_text().strip() == hashlib.sha256(requirements.read_bytes()).hexdigest()
+
+
+def test_npm_install_is_skipped_only_for_complete_matching_lock(tmp_path):
+    prefix = tmp_path / "npm"
+    (prefix / "node_modules/pkg").mkdir(parents=True)
+    wanted = {"lockfileVersion": 3, "packages": {"": {}, "node_modules/pkg": {"version": "1.2.3", "integrity": "sha512-fixture"}}}
+    actual = {"lockfileVersion": 3, "packages": {"": {}, "node_modules/pkg": {"version": "1.2.3", "integrity": "sha512-fixture"}}}
+    (prefix / "package-lock.json").write_text(json.dumps(wanted))
+    (prefix / "node_modules/.package-lock.json").write_text(json.dumps(actual))
+    required = prefix / "node_modules/pkg/index.js"
+    required.write_text("ok")
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node unavailable")
+    body = f"if (-not (Test-NpmInstall {ps_quote(node)} {ps_quote(prefix)} @('node_modules\\pkg\\index.js'))) {{ throw 'Matching lock rejected' }}"
+    result = run_reuse_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    actual["packages"]["node_modules/pkg"]["version"] = "9.9.9"
+    (prefix / "node_modules/.package-lock.json").write_text(json.dumps(actual))
+    result = run_reuse_ps(tmp_path, f"if (Test-NpmInstall {ps_quote(node)} {ps_quote(prefix)} @('node_modules\\pkg\\index.js')) {{ throw 'Drift accepted' }}")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_npm_install_step_adopts_then_skips_matching_lock(tmp_path):
+    prefix = tmp_path / "npm"
+    (prefix / "node_modules/pkg").mkdir(parents=True)
+    lock = {"lockfileVersion": 3, "packages": {"": {}, "node_modules/pkg": {"version": "1.2.3"}}}
+    (prefix / "package-lock.json").write_text(json.dumps(lock))
+    (prefix / "node_modules/.package-lock.json").write_text(json.dumps(lock))
+    (prefix / "node_modules/pkg/index.js").write_text("ok")
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node unavailable")
+    body = f"""
+Install-NpmDependencies {ps_quote(node)} 'missing-npm.js' {ps_quote(prefix)} @('node_modules\\pkg\\index.js') 'Fixture npm'
+Install-NpmDependencies {ps_quote(node)} 'missing-npm.js' {ps_quote(prefix)} @('node_modules\\pkg\\index.js') 'Fixture npm'
+"""
+    result = run_reuse_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "existantes verifiees et adoptees" in result.stdout
+    assert "deja conformes, installation ignoree" in result.stdout
+    receipt = prefix / ".web2api-npm-lock-sha256"
+    assert receipt.read_text().strip() == hashlib.sha256((prefix / "package-lock.json").read_bytes()).hexdigest()
+
+
+def test_compatible_playwright_browser_is_copied_only_for_same_descriptor(tmp_path):
+    package = tmp_path / "current-package"
+    sibling_package = tmp_path / "sibling-package"
+    browsers = tmp_path / "current-browsers"
+    sibling_browsers = tmp_path / "sibling-browsers"
+    for folder in (package, sibling_package):
+        (folder / "node_modules/playwright-core").mkdir(parents=True)
+        (folder / "node_modules/playwright-core/browsers.json").write_text('{"browsers":[{"name":"chromium","revision":"7"}]}')
+    chrome = sibling_browsers / "chromium-7/chrome-win/chrome.exe"
+    chrome.parent.mkdir(parents=True)
+    chrome.write_bytes(b"browser")
+    body = f"""
+if (-not (Copy-CompatiblePlaywrightBrowsers {ps_quote(package)} {ps_quote(browsers)} {ps_quote(sibling_package)} {ps_quote(sibling_browsers)})) {{ throw 'Compatible browser rejected' }}
+if (-not (Test-Path -LiteralPath {ps_quote(browsers / 'chromium-7/chrome-win/chrome.exe')})) {{ throw 'Browser was not copied' }}
+"""
+    result = run_reuse_ps(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    shutil.rmtree(browsers)
+    (sibling_package / "node_modules/playwright-core/browsers.json").write_text('{"browsers":[{"name":"chromium","revision":"8"}]}')
+    result = run_reuse_ps(tmp_path, f"if (Copy-CompatiblePlaywrightBrowsers {ps_quote(package)} {ps_quote(browsers)} {ps_quote(sibling_package)} {ps_quote(sibling_browsers)}) {{ throw 'Mismatched browser accepted' }}")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not browsers.exists()
 
 
 def test_unsafe_archive_is_rejected(tmp_path):

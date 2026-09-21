@@ -63,14 +63,19 @@ try {
     $transcript=$true
     @{product='Web2API-Continue';installation_target='codex';root=$InstallRoot} | ConvertTo-Json | Set-Content -LiteralPath $progressMarker -Encoding UTF8
     $dependencies=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'dependencies.json') -Raw | ConvertFrom-Json
+    $explicitCache=-not [string]::IsNullOrWhiteSpace($CacheDirectory)
     if (-not $CacheDirectory) { $CacheDirectory=Join-Path $InstallRoot 'cache' }
     $CacheDirectory=[IO.Path]::GetFullPath($CacheDirectory)
     Assert-NoRedirect $CacheDirectory
     New-Item -ItemType Directory -Path $CacheDirectory -Force | Out-Null
     . (Join-Path $PSScriptRoot 'Download.ps1')
+    . (Join-Path $PSScriptRoot 'Reuse.ps1')
+    $script:SiblingInstallRoot=Get-CompatibleSiblingInstallation $InstallRoot 'codex'
     $script:InstallStepCount=17
     Write-InstallStatus ('Installation Codex : '+$InstallRoot)
     Write-InstallStatus ('Progression globale : '+$script:InstallStepCount+' etapes ; journal logs\install.log')
+    if ($script:SiblingInstallRoot) { Write-InstallStatus ('Installation Continue compatible detectee : '+$script:SiblingInstallRoot) }
+    else { Write-InstallStatus 'Aucune installation Continue compatible a reutiliser.' }
     Start-InstallStep 'Preparation et controle de l''installation Codex'
     if (Test-Path -LiteralPath (Join-Path $InstallRoot 'Stop.ps1')) { & (Join-Path $InstallRoot 'Stop.ps1') }
     if (Test-Path -LiteralPath $marker) {
@@ -93,7 +98,7 @@ try {
     $env:UV_PYTHON_INSTALL_DIR=Join-Path $InstallRoot 'python'
     $env:UV_PYTHON_BIN_DIR=Join-Path $InstallRoot 'apps\python-bin'
     $env:UV_NO_MODIFY_PATH='1'
-    $env:UV_CACHE_DIR=Join-Path $CacheDirectory 'uv'
+    $env:UV_CACHE_DIR=Get-ReusableUvCache (Join-Path $CacheDirectory 'uv') $script:SiblingInstallRoot $explicitCache
     $env:PYTHONUTF8='1'
     $env:PYTHONUNBUFFERED='1'
     if (-not (Test-Path -LiteralPath $python)) { Invoke-Checked $uv @('venv','--managed-python','--python',$dependencies.python,(Join-Path $InstallRoot 'venv')) -Label 'Creation Python : venv' }
@@ -107,19 +112,19 @@ try {
         }
     }
     Start-InstallStep 'Bibliotheques Python de la passerelle'
-    Invoke-Checked $uv @('pip','install','--python',$python,'--require-hashes','-r',(Join-Path $app 'installer\requirements-core.lock')) -Label 'Installation des bibliotheques Python'
+    Install-PythonRequirements $uv $python (Join-Path $app 'installer\requirements-core.lock') '.web2api-requirements-core-sha256' 'Installation des bibliotheques Python'
     Start-InstallStep 'Installation de ChatGPT Web2API'
     Invoke-Checked $uv @('pip','install','--python',$python,'--no-deps','--no-build-isolation','--reinstall-package','chatgpt-web2api',$app) -Label 'Installation du paquet ChatGPT Web2API'
     Start-InstallStep 'Paquets isoles OpenCodex, Codex et Playwright'
     $npmRoot=Join-Path $InstallRoot 'apps\npm'
     New-Item -ItemType Directory -Path $npmRoot -Force | Out-Null
     foreach ($name in @('package.json','package-lock.json')) { Copy-Item -LiteralPath (Join-Path $app ('integration\codex-npm\'+$name)) -Destination $npmRoot -Force }
-    Invoke-Checked $node @($npm,'ci','--prefix',$npmRoot,'--no-audit','--no-fund','--loglevel=info') -Label 'Installation npm privee de la distribution Codex'
+    Install-NpmDependencies $node $npm $npmRoot @('node_modules\playwright\cli.js','node_modules\@openai\codex\bin\codex.js','node_modules\@bitkyc08\opencodex\package.json') 'Installation npm privee de la distribution Codex'
     Start-InstallStep 'Navigateur Chromium dedie'
-    $env:PLAYWRIGHT_BROWSERS_PATH=Join-Path $InstallRoot 'browsers'
-    Invoke-Checked $node @((Join-Path $npmRoot 'node_modules\playwright\cli.js'),'install','chromium') -Label 'Installation de Chromium'
-    $browser=Get-ChildItem -LiteralPath $env:PLAYWRIGHT_BROWSERS_PATH -Filter chrome.exe -Recurse | Where-Object { $_.FullName -notlike '*headless*' } | Select-Object -First 1
-    if (-not $browser) { throw 'Navigateur Chromium absent.' }
+    $browserRoot=Join-Path $InstallRoot 'browsers'
+    $siblingBrowserPackage=if ($script:SiblingInstallRoot) { Join-Path $script:SiblingInstallRoot 'tools\browser' } else { '' }
+    $siblingBrowsers=if ($script:SiblingInstallRoot) { Join-Path $script:SiblingInstallRoot 'browsers' } else { '' }
+    $browser=Install-PlaywrightChromium $node (Join-Path $npmRoot 'node_modules\playwright\cli.js') $npmRoot $browserRoot $siblingBrowserPackage $siblingBrowsers 'Verification et installation de Chromium'
     Start-InstallStep 'Application de bureau Codex'
     $desktopId=''
     if ($SkipDesktop) { Write-InstallStatus 'Application de bureau NON verifiee/installee : -SkipDesktop -NoLaunch explicites.' }

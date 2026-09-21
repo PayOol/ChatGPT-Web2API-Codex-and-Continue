@@ -58,6 +58,38 @@ def test_only_active_normal_continue_extension_is_selected(tmp_path):
     assert Path(p.stdout.strip()) == current
 
 
+def test_normal_continue_single_json_entry_does_not_become_object_array(tmp_path):
+    extensions = tmp_path / "extensions"
+    current = extensions / "continue.continue-2.0.0"
+    current.mkdir(parents=True)
+    (current / "package.json").write_text('{"version":"2.0.0"}')
+    # This exact one-element array triggered System.Object[] on Windows
+    # PowerShell 5.1 after VS Code had installed Continue successfully.
+    (extensions / "extensions.json").write_text(json.dumps([
+        {"identifier": {"id": "continue.continue"}, "version": "2.0.0",
+         "relativeLocation": current.name, "location": {"path": "/ignored"}}
+    ]))
+    script = tmp_path / "single.ps1"
+    script.write_text(f". {q(ROOT / 'installer/NormalProfile.ps1')}\n(Find-NormalContinue {q(extensions)}).FullName")
+    p = run_ps(script)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert Path(p.stdout.strip()) == current
+
+
+@pytest.mark.parametrize("relative", [["continue.continue-2.0.0"], "../outside", "nested/folder"])
+def test_normal_continue_rejects_non_scalar_or_unsafe_relative_location(tmp_path, relative):
+    extensions = tmp_path / "extensions"
+    extensions.mkdir()
+    (extensions / "extensions.json").write_text(json.dumps([
+        {"identifier": {"id": "continue.continue"}, "version": "2.0.0",
+         "relativeLocation": relative}
+    ]))
+    script = tmp_path / "unsafe.ps1"
+    script.write_text(f". {q(ROOT / 'installer/NormalProfile.ps1')}\nif ($null -ne (Find-NormalContinue {q(extensions)})) {{ throw 'unsafe entry accepted' }}")
+    p = run_ps(script)
+    assert p.returncode == 0, p.stdout + p.stderr
+
+
 def test_old_portable_profile_is_archived_without_replacing_normal_profile(tmp_path):
     root = tmp_path / "managed with spaces"
     folder = root / "apps/vscode/data/user-data"

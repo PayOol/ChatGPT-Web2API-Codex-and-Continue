@@ -55,12 +55,17 @@ try {
     $transcript=$true
     Set-Content -LiteralPath $progressMarker -Value 'Web2API-Continue' -Encoding ASCII
     $dependencies=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'dependencies.json') -Raw | ConvertFrom-Json
+    $explicitCache=-not [string]::IsNullOrWhiteSpace($CacheDirectory)
     if (-not $CacheDirectory) { $CacheDirectory=Join-Path $InstallRoot 'cache' }
     $CacheDirectory=[IO.Path]::GetFullPath($CacheDirectory)
     New-Item -ItemType Directory -Path $CacheDirectory -Force | Out-Null
     . (Join-Path $PSScriptRoot 'Download.ps1')
+    . (Join-Path $PSScriptRoot 'Reuse.ps1')
+    $script:SiblingInstallRoot=Get-CompatibleSiblingInstallation $InstallRoot 'continue'
     Write-InstallStatus ('Installation dans : '+$InstallRoot)
     Write-InstallStatus ('Journal detaille : '+$InstallRoot+'\logs\install.log')
+    if ($script:SiblingInstallRoot) { Write-InstallStatus ('Installation Codex compatible detectee : '+$script:SiblingInstallRoot) }
+    else { Write-InstallStatus 'Aucune installation Codex compatible a reutiliser.' }
     Write-InstallStatus 'Progression globale : 21 etapes. Le pourcentage compte les etapes, pas le temps restant.'
     Start-InstallStep 'Preparation et controle de l''installation'
     $editors=@(Get-CimInstance Win32_Process -Filter "Name = 'Code.exe'")
@@ -94,7 +99,7 @@ try {
     $env:UV_PYTHON_INSTALL_DIR=Join-Path $InstallRoot 'python'
     $env:UV_PYTHON_BIN_DIR=Join-Path $InstallRoot 'apps\python-bin'
     $env:UV_NO_MODIFY_PATH='1'
-    $env:UV_CACHE_DIR=Join-Path $CacheDirectory 'uv'
+    $env:UV_CACHE_DIR=Get-ReusableUvCache (Join-Path $CacheDirectory 'uv') $script:SiblingInstallRoot $explicitCache
     $env:PYTHONUTF8='1'
     $env:PYTHONUNBUFFERED='1'
     foreach ($name in @('venv','computer-venv')) {
@@ -114,27 +119,28 @@ try {
     $python=Join-Path $InstallRoot 'venv\Scripts\python.exe'
     $computerPython=Join-Path $InstallRoot 'computer-venv\Scripts\python.exe'
     Start-InstallStep 'Bibliotheques Python de la passerelle'
-    Invoke-Checked $uv @('pip','install','--python',$python,'--require-hashes','-r',(Join-Path $app 'installer\requirements-core.lock')) -Label 'Installation des bibliotheques Python'
+    Install-PythonRequirements $uv $python (Join-Path $app 'installer\requirements-core.lock') '.web2api-requirements-core-sha256' 'Installation des bibliotheques Python'
     Start-InstallStep 'Installation de ChatGPT Web2API'
     Invoke-Checked $uv @('pip','install','--python',$python,'--no-deps','--no-build-isolation','--reinstall-package','chatgpt-web2api',$app) -Label 'Installation du paquet ChatGPT Web2API'
     Start-InstallStep 'Bibliotheques des outils Windows'
-    Invoke-Checked $uv @('pip','install','--python',$computerPython,'--require-hashes','-r',(Join-Path $app 'installer\requirements-computer.lock')) -Label 'Installation des bibliotheques Windows-MCP'
+    Install-PythonRequirements $uv $computerPython (Join-Path $app 'installer\requirements-computer.lock') '.web2api-requirements-computer-sha256' 'Installation des bibliotheques Windows-MCP'
     Start-InstallStep 'Copie des cinq serveurs d''outils'
     $tools=Join-Path $InstallRoot 'tools'
     New-Item -ItemType Directory -Path $tools -Force | Out-Null
     Copy-InstallTree (Join-Path $app 'integration\tools') $tools
     Start-InstallStep 'Outils navigateur Playwright'
-    Invoke-Checked $node @($npm,'ci','--prefix',(Join-Path $tools 'browser'),'--no-audit','--no-fund','--loglevel=info') -Label 'Installation npm de Playwright'
+    $browserPackage=Join-Path $tools 'browser'
+    Install-NpmDependencies $node $npm $browserPackage @('node_modules\playwright\cli.js') 'Installation npm de Playwright'
     Start-InstallStep 'Services connectes Codex et Hostinger'
     $npmRoot=Join-Path $InstallRoot 'apps\npm'
     New-Item -ItemType Directory -Path $npmRoot -Force | Out-Null
     Copy-Item -Path (Join-Path $app 'integration\npm\package*.json') -Destination $npmRoot -Force
-    Invoke-Checked $node @($npm,'ci','--prefix',$npmRoot,'--no-audit','--no-fund','--loglevel=info') -Label 'Installation npm de Codex et Hostinger'
+    Install-NpmDependencies $node $npm $npmRoot @('node_modules\@openai\codex\bin\codex.js','node_modules\hostinger-api-mcp\src\servers\all.js') 'Installation npm de Codex et Hostinger'
     Start-InstallStep 'Navigateur Chromium dedie'
-    $env:PLAYWRIGHT_BROWSERS_PATH=Join-Path $InstallRoot 'browsers'
-    Invoke-Checked $node @((Join-Path $tools 'browser\node_modules\playwright\cli.js'),'install','chromium') -Label 'Telechargement et installation de Chromium'
-    $browser=Get-ChildItem -LiteralPath $env:PLAYWRIGHT_BROWSERS_PATH -Filter chrome.exe -Recurse | Where-Object { $_.FullName -notlike '*headless*' } | Select-Object -First 1
-    if (-not $browser) { throw 'Navigateur Chromium absent.' }
+    $browserRoot=Join-Path $InstallRoot 'browsers'
+    $siblingBrowserPackage=if ($script:SiblingInstallRoot) { Join-Path $script:SiblingInstallRoot 'apps\npm' } else { '' }
+    $siblingBrowsers=if ($script:SiblingInstallRoot) { Join-Path $script:SiblingInstallRoot 'browsers' } else { '' }
+    $browser=Install-PlaywrightChromium $node (Join-Path $browserPackage 'node_modules\playwright\cli.js') $browserPackage $browserRoot $siblingBrowserPackage $siblingBrowsers 'Verification et installation de Chromium'
     Start-InstallStep 'Extension Continue 2.0.0'
     $extensions=Join-Path $env:USERPROFILE '.vscode\extensions'
     $extension=Find-NormalContinue $extensions

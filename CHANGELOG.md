@@ -1,3 +1,10 @@
+# Distribution 0.4.6
+
+- Corrige la détection de Continue 2.0.0 dans le profil VS Code normal sous Windows PowerShell 5.1 ; le tableau de `extensions.json` n'est plus transmis à `Join-Path` comme `System.Object[]`.
+- Détecte l'installation de l'autre cible uniquement lorsque son manifeste et sa racine correspondent, puis réutilise ses archives après contrôle SHA-256, son cache uv et son Chromium lorsque le descripteur Playwright est identique.
+- Vérifie les versions Python et les verrous npm déjà installés avant chaque reprise. Les étapes conformes sont ignorées ; une dérive ou un fichier manquant déclenche l'installation puis une seconde vérification.
+- Conserve des copies d'exécution séparées pour Codex et Continue afin que leurs réparations, mises à jour et désinstallations restent indépendantes.
+
 # Distribution 0.4.5
 
 - Corrige les images natives renvoyées par un outil Codex : elles restent des résultats d'outil, sont rattachées à leur appel et leurs pixels sont joints à la continuation. Les captures historiques ne sont pas renvoyées à chaque tour.

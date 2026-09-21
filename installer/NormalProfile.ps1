@@ -16,10 +16,22 @@ function Find-NormalEditor {
 function Find-NormalContinue([string]$Extensions) {
     $index=Join-Path $Extensions 'extensions.json'
     if (-not (Test-Path -LiteralPath $index)) { return $null }
-    $entry=Get-Content -LiteralPath $index -Raw | ConvertFrom-Json | Where-Object { $_.identifier.id -eq 'continue.continue' -and $_.version -eq '2.0.0' } | Select-Object -First 1
-    if (-not $entry -or -not $entry.relativeLocation -or $entry.relativeLocation -match '[/\\]') { return $null }
-    $candidate=Join-Path $Extensions $entry.relativeLocation
-    if (Test-Path -LiteralPath (Join-Path $candidate 'package.json')) { return Get-Item -LiteralPath $candidate }
+    # Windows PowerShell 5.1 keeps a JSON top-level array as one pipeline
+    # object. Piping ConvertFrom-Json directly to Where-Object therefore
+    # selects the whole Object[] and turns relativeLocation into Object[].
+    # A foreach statement enumerates the parsed array reliably on 5.1.
+    $entries=Get-Content -LiteralPath $index -Raw | ConvertFrom-Json
+    foreach ($entry in $entries) {
+        if ($null -eq $entry -or $null -eq $entry.identifier) { continue }
+        if ($entry.identifier.id -ne 'continue.continue' -or $entry.version -ne '2.0.0') { continue }
+        $relative=$entry.relativeLocation
+        if ($relative -isnot [string] -or [string]::IsNullOrWhiteSpace($relative) -or $relative -match '[/\\]' -or $relative -in @('.','..')) { continue }
+        $candidate=Join-Path $Extensions $relative
+        $package=Join-Path $candidate 'package.json'
+        if (-not (Test-Path -LiteralPath $package -PathType Leaf)) { continue }
+        try { $metadata=Get-Content -LiteralPath $package -Raw | ConvertFrom-Json } catch { continue }
+        if ($metadata.version -eq '2.0.0') { return Get-Item -LiteralPath $candidate }
+    }
     return $null
 }
 
