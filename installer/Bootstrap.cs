@@ -30,7 +30,9 @@ internal static class Bootstrap {
                     default: throw new ArgumentException("Option inconnue : " + args[i]);
                 }
             }
-            string folder = extract ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Web2API-Continue-Setup", "0.3.1-" + Guid.NewGuid().ToString("N"));
+            Console.Title = "Installation ChatGPT Web2API + Continue";
+            Console.WriteLine("Preparation de l'installateur 0.3.2 - verification de l'archive embarquee...");
+            string folder = extract ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Web2API-Continue-Setup", "0.3.2-" + Guid.NewGuid().ToString("N"));
             if (Directory.Exists(folder)) throw new IOException("Le dossier d'extraction existe deja : " + folder);
             Directory.CreateDirectory(folder);
             using (Stream payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")) {
@@ -39,12 +41,21 @@ internal static class Bootstrap {
                     if (actual != "__PAYLOAD_SHA256__") throw new IOException("Integrite du programme d'installation invalide.");
                 }
                 payload.Position = 0;
+                Console.WriteLine("Integrite SHA256 valide. Extraction des fichiers de l'installateur...");
                 using (var archive = new ZipArchive(payload, ZipArchiveMode.Read)) {
+                    int completed = 0;
+                    var timer = Stopwatch.StartNew();
+                    double lastUpdate = 0;
                     foreach (var entry in archive.Entries) {
                         string path = Path.GetFullPath(Path.Combine(folder, entry.FullName));
                         if (!path.StartsWith(folder.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new IOException("Chemin d'archive invalide.");
                         if (entry.Name.Length == 0) { Directory.CreateDirectory(path); continue; }
                         Directory.CreateDirectory(Path.GetDirectoryName(path)); entry.ExtractToFile(path);
+                        completed++;
+                        if (timer.Elapsed.TotalSeconds - lastUpdate >= 1 || completed == archive.Entries.Count) {
+                            Console.WriteLine("Extraction de l'installateur : {0}/{1} fichiers ({2:F0}%)", completed, archive.Entries.Count, 100.0 * completed / archive.Entries.Count);
+                            lastUpdate = timer.Elapsed.TotalSeconds;
+                        }
                     }
                 }
             }
@@ -53,6 +64,8 @@ internal static class Bootstrap {
             Console.WriteLine("Installation complete pour Windows x64. Connexion Internet requise.");
             string shell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
             var start = new ProcessStartInfo(shell, "-NoProfile -ExecutionPolicy Bypass -File " + Quote(Path.Combine(folder, "installer", "Setup.ps1")) + forwarded) { UseShellExecute = false, WorkingDirectory = folder };
+            // A launch from PowerShell 7 must not load its incompatible modules in 5.1.
+            start.EnvironmentVariables.Remove("PSModulePath");
             using (var process = Process.Start(start)) {
                 process.WaitForExit(); int code = process.ExitCode;
                 if (code != 0) Console.WriteLine("Installation interrompue. Le journal indique le composant a reparer.");

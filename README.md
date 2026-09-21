@@ -4,7 +4,7 @@ Distribution privée regroupant ChatGPT-Web2API, les correctifs de notre intégr
 
 ## Installer
 
-1. Depuis [la dernière version](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/latest), télécharger **Web2API-Continue-Setup-0.3.1.exe**.
+1. Depuis [la dernière version](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/latest), télécharger **Web2API-Continue-Setup-0.3.2.exe**.
 2. Lancer ce fichier. Il télécharge les dépendances, installe l'éditeur et l'extension, applique tous les correctifs, écrit la configuration, crée les raccourcis et démarre l'environnement.
 3. À la première ouverture, se connecter à **son propre compte ChatGPT** dans le navigateur dédié, puis ouvrir son dossier de travail dans VS Code et choisir le mode Agent de Continue.
 
@@ -13,6 +13,16 @@ Windows x64 et une connexion Internet sont nécessaires. L'installation se fait 
 Le dépôt et ses versions sont privés. Le propriétaire doit donner accès aux personnes autorisées, ou leur transmettre l'installateur. Une fois le fichier reçu, aucun identifiant GitHub n'est nécessaire pour installer : ses dépendances viennent de leurs sources publiques officielles.
 
 Alternative avec le code source : extraire l'archive puis lancer `Install.cmd`. Cela exécute exactement la même procédure.
+
+## Progression de l'installation
+
+La version 0.3.2 affiche 21 étapes numérotées et horodatées : préparation, composants, Python, bibliothèques, outils, navigateur, Continue, correctifs, diagnostic, raccourcis et lancement. Chaque étape réussie indique sa durée. Le pourcentage global compte les étapes terminées ; il ne prédit pas la durée totale.
+
+Pour les archives téléchargées directement, l'installateur affiche la taille reçue, le débit moyen et, lorsque le serveur annonce une taille totale, le pourcentage et le temps restant estimé. Une taille inconnue est indiquée explicitement. La vérification SHA-256, l'extraction, la copie, la réutilisation du cache et les nouvelles tentatives sont visibles.
+
+Les commandes Python, npm, Playwright et VS Code transmettent leurs sorties au fil de l'exécution. Une commande sans nouvelle sortie produit un message « EN COURS » toutes les cinq secondes ; ce message indique qu'elle est encore en attente, sans prétendre mesurer son avancement interne. Les téléchargements réalisés par ces outils conservent le détail qu'ils fournissent.
+
+Le journal complet est écrit dans `%LOCALAPPDATA%\Programs\Web2API-Continue\logs\install.log` (ou `logs\install.log` dans le dossier choisi). Une erreur indique l'étape concernée et le chemin du journal. Relancer l'installateur reprend en réutilisant les composants et archives déjà vérifiés.
 
 ## Ce qui est installé et configuré
 
@@ -49,7 +59,7 @@ Une interruption dans Continue ou la fermeture du client annule l'observation et
 
 Dans `config.json`, `request_timeout: 0` et les cinq paramètres `detector_*_timeout_seconds: 0` signifient « sans limite ». Une valeur positive réactive volontairement la limite correspondante en secondes. Le délai total éventuel couvre les deux phases d'attente sans repartir à zéro à l'apparition du message. Dans la configuration Continue installée, `requestOptions.timeout: 0` active l'attente sans minuteur du correctif local.
 
-Pour mettre à jour une installation 0.3.0, fermer son éditeur puis lancer l'installateur 0.3.1 sur le même dossier. Les configurations remplacées sont sauvegardées et les comptes/profils sont conservés. Si le correctif est appliqué à une extension déjà chargée, recharger sa fenêtre VS Code pour charger le nouveau code.
+Pour mettre à jour une installation 0.3.0 ou 0.3.1, fermer son éditeur puis lancer l'installateur 0.3.2 sur le même dossier. Les configurations remplacées sont sauvegardées et les comptes/profils sont conservés. Si le correctif est appliqué à une extension déjà chargée, recharger sa fenêtre VS Code pour charger le nouveau code.
 
 ## Maintenance et développement
 

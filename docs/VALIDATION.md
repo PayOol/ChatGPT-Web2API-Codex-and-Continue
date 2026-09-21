@@ -1,4 +1,14 @@
-# Validation de la distribution 0.3.1
+# Validation de la distribution 0.3.2
+
+## Progression de l'installateur — 21 septembre 2026
+
+La version 0.3.2 ajoute 21 étapes numérotées, la progression des archives téléchargées, les détails d'extraction et de copie, les sorties des sous-processus et un message périodique pendant leur silence. Toutes ces lignes sont conservées dans le journal d'installation. Les fonctions réseau et processus sont exécutées réellement par Windows PowerShell 5.1 dans les tests, contre des fixtures locales.
+
+Onze scénarios couvrent les réponses HTTP avec taille connue ou inconnue, le gzip du Marketplace, les redirections, une erreur 503 suivie d'une nouvelle tentative, les en-têtes retardés, la réutilisation du cache vérifié, le rejet d'une mauvaise empreinte, une archive qui tente de sortir de son dossier, les arguments contenant espaces/guillemets, les sorties stdout/stderr simultanées, le silence d'un processus, son code d'erreur, le lanceur batch et la syntaxe des scripts.
+
+L'exécutable a été compilé et son extraction a été exécutée : contrôle SHA-256 et progression jusqu'à 100 %. La suite d'installation manuelle GitHub Actions utilise désormais cet EXE sur un runner Windows neuf et vérifie la présence des 21 étapes dans le journal avant d'inspecter les cinq catalogues MCP. Le journal est conservé comme artefact du workflow. Les résultats distants sont consultables dans l'onglet Actions du dépôt privé.
+
+Le pourcentage global mesure le nombre d'étapes terminées. Les débits et estimations ne concernent que les téléchargements mesurables ; une commande externe silencieuse ne fournit pas de pourcentage interne. Les tests locaux de progression ne lancent ni VS Code ni une session ChatGPT et ne touchent pas l'installation en cours de l'utilisateur.
 
 ## Correctif des réflexions longues — 21 septembre 2026
 

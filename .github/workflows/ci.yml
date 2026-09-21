@@ -48,11 +48,26 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.3'
+      - name: Build the executable to test
+        run: python installer/build_release.py --output dist
       - name: Install without opening the editor or creating shortcuts
         shell: powershell
-        run: ./installer/Setup.ps1 -InstallRoot "$env:RUNNER_TEMP\Web2API test" -NoLaunch -NoShortcuts
+        run: |
+          $exe=(Get-ChildItem dist\Web2API-Continue-Setup-*.exe).FullName
+          & $exe --root "$env:RUNNER_TEMP\Web2API test" --no-launch --no-shortcuts
+          if ($LASTEXITCODE -ne 0) { throw 'Installer failed' }
+          $log=Get-Content "$env:RUNNER_TEMP\Web2API test\logs\install.log" -Raw
+          if ([regex]::Matches($log,'ETAPE \[').Count -ne 21 -or $log -notmatch '21/21 etapes \(100%\)') { throw 'Incomplete progress transcript' }
       - name: Inspect all five live MCP catalogs
         shell: powershell
         run: |
           $root="$env:RUNNER_TEMP\Web2API test"
           & "$root\venv\Scripts\python.exe" "$root\app\installer\doctor.py" --root $root --offline --check-tools
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Installation-progress-log
+          path: ${{ runner.temp }}/Web2API test/logs/install.log

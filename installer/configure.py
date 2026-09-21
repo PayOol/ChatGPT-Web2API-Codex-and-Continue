@@ -11,7 +11,7 @@ import socket
 import sqlite3
 import time
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 
 def write_changed(path: Path, data: bytes, backup: Path):
@@ -105,9 +105,11 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
     if not extension.is_relative_to(root):
         raise ValueError("Only the extension in the managed installation may be patched.")
     backup = root / "backups" / time.strftime("%Y%m%d-%H%M%S")
+    print("Configuration : sauvegardes et correctifs d'acces, compaction et attente longue", flush=True)
     patch_hashes = apply_continue_patches(extension, source, backup)
     port = old.get("api_port") or available_port(8080)
     cdp = old.get("cdp_port") or available_port(9222, avoid=(port,))
+    print(f"Configuration : ports API {port}, navigateur {cdp}", flush=True)
     continue_dir = root / "continue"
     state_dir = root / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -191,6 +193,7 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
     config["mcpServers"] = servers + [
         s for s in config.get("mcpServers", []) if s.get("name") not in {s["name"] for s in servers}
     ]
+    print("Configuration : modele ChatGPT et outils Local, Browser, Computer, Vision, Connected", flush=True)
     write_changed(
         config_path,
         yaml.safe_dump(config, allow_unicode=True, sort_keys=False).encode("utf-8"),
@@ -228,6 +231,7 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
         backup,
     )
     data = root / "vscode-data"
+    print("Configuration : profil VS Code, regles et protection des versions", flush=True)
     settings_path = data / "User/settings.json"
     settings = read_json(settings_path)
     settings.update(
@@ -255,6 +259,7 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
             ("extensions.donotAutoUpdate", json.dumps(values)),
         )
     server = read_json(root / "config.json")
+    print("Configuration : passerelle, environnement et manifeste d'installation", flush=True)
     server.update(
         chrome_path=str(browser),
         user_data_dir=str(root / "browser-profile"),
