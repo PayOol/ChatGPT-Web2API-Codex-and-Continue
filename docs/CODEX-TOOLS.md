@@ -10,6 +10,8 @@ Les descriptions des espaces de noms sont conservées et les descriptions facult
 
 Les consignes comprennent des exemples explicites pour découvrir les outils via le global `ALL_TOOLS` et transmettre les pixels via `image(result.image_url)` ou `image(block)`. Sérialiser une URL de données dans `text(JSON.stringify(...))` ne livre pas une image au modèle. Ces exemples corrigent deux usages erronés effectivement observés, sans altérer automatiquement le code demandé par le modèle.
 
+Le test visuel a également révélé une attente persistante après une réponse déjà terminée : la projection backend omettait le texte des messages utilisateur `multimodal_text`. Elle conserve désormais leurs parties textuelles, ce qui permet de comparer l'intégralité du message d'origine et d'engager la réparation de format. Les données d'images et les contenus non textuels de l'assistant restent exclus. Un test exécute le vrai JavaScript de projection puis la reconnaissance du message par son identifiant.
+
 ## Matrice
 
 | Parcours | Couverture |

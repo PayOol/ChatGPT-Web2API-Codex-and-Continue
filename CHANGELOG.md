@@ -1,6 +1,7 @@
 # Distribution 0.4.5
 
 - Corrige les images natives renvoyées par un outil Codex : elles restent des résultats d'outil, sont rattachées à leur appel et leurs pixels sont joints à la continuation. Les captures historiques ne sont pas renvoyées à chaque tour.
+- Corrige l'attente après une réponse terminée à une image : préserve le texte d'origine des messages utilisateur multimodaux pour vérifier leur empreinte avant réparation du format.
 - Conserve les descriptions des espaces de noms et accepte les descriptions nulles facultatives.
 - Donne des exemples explicites de découverte `ALL_TOOLS` et de transmission des pixels avec `image(...)`, après reproduction d'appels mal construits dans Codex.
 - Prend en charge les restrictions `allowed_tools` et vérifie le type des outils imposés, tout en conservant les résultats historiques des outils exclus au tour courant.
