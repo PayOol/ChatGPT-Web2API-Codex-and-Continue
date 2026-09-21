@@ -57,7 +57,7 @@ def test_headless_configuration_is_explicit_and_never_claims_desktop_installed(d
     monkeypatch.delenv("CODEX_HOME")
     manifest = configure(distribution, skip_desktop=True)
     root, user, _ = distribution
-    assert manifest["version"] == "0.4.0"
+    assert manifest["version"] == json.loads((SOURCE / "installer/dependencies.json").read_text(encoding="utf-8"))["version"]
     assert manifest["product"] == "Web2API-Continue"
     assert manifest["installation_target"] == "codex"
     assert manifest["desktop"] == {"status": "skipped", "app_id": ""}
