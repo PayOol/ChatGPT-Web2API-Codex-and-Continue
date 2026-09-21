@@ -18,7 +18,8 @@ function Receive-InstallDownload([string]$Url,[string]$Path,[string]$Label) {
                 Write-InstallStatus ('Connexion en cours : '+$Label+' - attente des en-tetes HTTP')
                 $last=$timer.Elapsed.TotalSeconds
             }
-            Start-Sleep -Milliseconds 100
+            # Wake immediately when data arrives; polling must not throttle TCP.
+            [void]$task.Wait(100)
         }
         $response=$task.GetAwaiter().GetResult()
         [void]$response.EnsureSuccessStatusCode()
@@ -35,7 +36,7 @@ function Receive-InstallDownload([string]$Url,[string]$Path,[string]$Label) {
                     Write-TransferProgress $Label $received $total $timer.Elapsed.TotalSeconds
                     $last=$timer.Elapsed.TotalSeconds
                 }
-                Start-Sleep -Milliseconds 100
+                [void]$read.Wait(100)
             }
             $count=$read.GetAwaiter().GetResult()
             if ($count -eq 0) { break }
