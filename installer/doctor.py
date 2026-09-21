@@ -26,6 +26,12 @@ def examine(root: Path, offline=False):
     env = json.loads((root / "environment.json").read_text(encoding="utf-8"))
     os.environ.update(env)
     check("Managed installation identity", manifest.get("product") == "Web2API-Continue")
+    for name in ["user-data", "extensions", "shared-data"]:
+        check("Portable editor " + name, (root / "apps/vscode/data" / name).is_dir())
+    check("Continue in portable editor", Path(manifest["extension"]).parent.resolve()
+          == (root / "apps/vscode/data/extensions").resolve())
+    check("Continue managed profile resolver",
+          (Path(manifest["extension"]) / "out/web2api-managed-environment.cjs").is_file())
     for name in [
         "venv/Scripts/python.exe",
         "computer-venv/Scripts/python.exe",
@@ -102,7 +108,7 @@ def examine(root: Path, offline=False):
     flags = json.loads((root / "continue/auto-compaction.local.json").read_text())
     check("Automatic compaction active", flags.get("enabled") and flags.get("threshold") == 0.75)
     with sqlite3.connect(
-        (root / "vscode-data/User/globalStorage/state.vscdb").as_uri() + "?mode=ro", uri=True
+        (root / "apps/vscode/data/user-data/User/globalStorage/state.vscdb").as_uri() + "?mode=ro", uri=True
     ) as conn:
         row = conn.execute(
             "SELECT value FROM ItemTable WHERE key='extensions.donotAutoUpdate'"

@@ -11,7 +11,7 @@ import socket
 import sqlite3
 import time
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 
 
 def write_changed(path: Path, data: bytes, backup: Path):
@@ -62,6 +62,7 @@ def apply_continue_patches(extension: Path, source: Path, backup: Path):
         "continue-full-access-changes.json",
         "continue-auto-compaction-changes.json",
         "continue-long-wait-changes.json",
+        "continue-managed-profile-changes.json",
     ]:
         changes.extend(read_json(source / "integration/continue" / name))
     texts = {}
@@ -83,6 +84,7 @@ def apply_continue_patches(extension: Path, source: Path, backup: Path):
         "continue-full-access.local.cjs",
         "continue-auto-compaction.local.cjs",
         "continue-long-wait.local.cjs",
+        "web2api-managed-environment.cjs",
     ]:
         write_changed(
             extension / "out" / name, (source / "integration/continue" / name).read_bytes(), backup
@@ -230,7 +232,7 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
         (source / "integration/continue/local-agent-tools.md").read_bytes(),
         backup,
     )
-    data = root / "vscode-data"
+    data = root / "apps/vscode/data/user-data"
     print("Configuration : profil VS Code, regles et protection des versions", flush=True)
     settings_path = data / "User/settings.json"
     settings = read_json(settings_path)
@@ -239,6 +241,8 @@ def configure(root: Path, source: Path, extension: Path, browser: Path):
             "continue.enableTabAutocomplete": False,
             "continue.enableNextEdit": False,
             "update.mode": "none",
+            "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}Web2API Continue",
+            "workbench.startupEditor": "none",
         }
     )
     write_json(settings_path, settings, backup)

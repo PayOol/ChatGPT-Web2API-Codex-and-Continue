@@ -1,6 +1,6 @@
 # ChatGPT Web2API + Continue
 
-L'environnement est installé. Le navigateur ChatGPT et cet éditeur utilisent les dossiers de cette installation.
+L'environnement est installé. Le titre de cette fenêtre contient **Web2API Continue**. Continue est déjà installé et le modèle **ChatGPT Web2API** est configuré automatiquement. Le navigateur ChatGPT et cet éditeur utilisent les dossiers de cette installation. Une connexion GitHub n'est pas nécessaire pour utiliser ce modèle local.
 
 1. Connectez votre compte ChatGPT dans le navigateur qui vient de s'ouvrir. Cette connexion personnelle ne peut pas être distribuée dans un installateur.
 2. Ouvrez votre dossier de travail avec **Fichier > Ouvrir un dossier**, puis l'icône Continue dans la barre latérale.

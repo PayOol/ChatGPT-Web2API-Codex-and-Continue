@@ -1,6 +1,9 @@
 param([string]$InstallRoot = "$env:LOCALAPPDATA\Programs\Web2API-Continue", [string]$CacheDirectory = '', [switch]$NoLaunch, [switch]$NoShortcuts)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference='SilentlyContinue'
+foreach ($name in @('VSCODE_IPC_HOOK_CLI','VSCODE_PORTABLE','ELECTRON_RUN_AS_NODE')) {
+    [Environment]::SetEnvironmentVariable($name,$null,'Process')
+}
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { throw 'Cette version exige Windows x64.' }
@@ -42,6 +45,9 @@ try {
     Expand-Verified 'rg' (Join-Path $InstallRoot 'apps\rg') 'rg.exe' -Flatten
     Start-InstallStep ('Editeur VS Code '+$dependencies.downloads.vscode.version)
     Expand-Verified 'vscode' (Join-Path $InstallRoot 'apps\vscode') 'Code.exe'
+    . (Join-Path $PSScriptRoot 'Portable.ps1')
+    Set-PortableEditor $InstallRoot
+    Write-InstallStatus 'Profil portable active : extensions, reglages et stockage isoles meme lors des retours de connexion.'
     Start-InstallStep ('Python '+$dependencies.python+' et ses deux environnements')
     $uv=Join-Path $InstallRoot 'apps\uv\uv.exe'
     $node=Join-Path $InstallRoot 'apps\node\node.exe'
@@ -92,18 +98,18 @@ try {
     $browser=Get-ChildItem -LiteralPath $env:PLAYWRIGHT_BROWSERS_PATH -Filter chrome.exe -Recurse | Where-Object { $_.FullName -notlike '*headless*' } | Select-Object -First 1
     if (-not $browser) { throw 'Navigateur Chromium absent.' }
     Start-InstallStep 'Extension Continue 2.0.0'
-    $extensions=Join-Path $InstallRoot 'extensions'
+    $extensions=Join-Path $InstallRoot 'apps\vscode\data\extensions'
     $extension=Get-ChildItem -LiteralPath $extensions -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('continue.continue-2.0.0-win32-x64','continue.continue-2.0.0') } | Select-Object -First 1
     if (-not $extension) {
         $vsix=Get-VerifiedDownload 'continue'
-        Invoke-Checked (Join-Path $InstallRoot 'apps\vscode\bin\code.cmd') @('--user-data-dir',(Join-Path $InstallRoot 'vscode-data'),'--extensions-dir',$extensions,'--install-extension',$vsix,'--force') -Label 'Installation de l''extension Continue'
+        Invoke-Checked (Join-Path $InstallRoot 'apps\vscode\bin\code.cmd') @('--install-extension',$vsix,'--force') -Label 'Installation de l''extension Continue'
         $extension=Get-ChildItem -LiteralPath $extensions -Directory | Where-Object { $_.Name -in @('continue.continue-2.0.0-win32-x64','continue.continue-2.0.0') } | Select-Object -First 1
     } else { Write-InstallStatus 'Extension Continue deja installee : reutilisation' }
     if (-not $extension) { throw 'Extension Continue 2.0.0 absente.' }
     Start-InstallStep 'Correctifs Continue et configuration des outils'
     Invoke-Checked $python @((Join-Path $app 'installer\configure.py'),'--root',$InstallRoot,'--source',$app,'--extension',$extension.FullName,'--browser',$browser.FullName) -Label 'Correctifs, profils et configuration'
     Start-InstallStep 'Installation des lanceurs et de la maintenance'
-    foreach ($name in @('Environment.ps1','Start.ps1','Start.cmd','Stop.ps1','Doctor.ps1','Doctor.cmd','Repair.cmd','Connect-Codex.cmd','Uninstall.ps1','Uninstall.cmd')) {
+    foreach ($name in @('Environment.ps1','Portable.ps1','Start.ps1','Start.cmd','Stop.ps1','Doctor.ps1','Doctor.cmd','Repair.cmd','Connect-Codex.cmd','Uninstall.ps1','Uninstall.cmd')) {
         Write-InstallStatus ('Lanceur : '+$name)
         Copy-Item -LiteralPath (Join-Path $app ('installer\'+$name)) -Destination $InstallRoot -Force
     }

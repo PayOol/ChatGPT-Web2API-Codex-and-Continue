@@ -5,6 +5,8 @@ if ($manifest.product -ne 'Web2API-Continue' -or [IO.Path]::GetFullPath($manifes
 $editors=@(Get-CimInstance Win32_Process -Filter "Name = 'Code.exe'" | Where-Object { $_.ExecutablePath -eq (Join-Path $root 'apps\vscode\Code.exe') })
 if($editors.Count){throw 'Fermer la fenetre VS Code de cette installation puis relancer.'}
 & (Join-Path $root 'Stop.ps1') -CloseBrowser
+. (Join-Path $PSScriptRoot 'Portable.ps1')
+Save-PortableEditorData $root
 $shell=New-Object -ComObject WScript.Shell
 foreach($folder in @([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Startup'))) {
     $shortcutPath=Join-Path $folder 'Web2API Continue.lnk'

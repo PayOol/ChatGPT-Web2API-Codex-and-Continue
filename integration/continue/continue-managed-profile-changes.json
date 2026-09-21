@@ -1,0 +1,7 @@
+[
+  {
+    "file": "out\\extension.js",
+    "before": "      const configPath = process.env.CONTINUE_GLOBAL_DIR;",
+    "after": "      const configPath = require(\"./web2api-managed-environment.cjs\").load(__dirname) || process.env.CONTINUE_GLOBAL_DIR;"
+  }
+]

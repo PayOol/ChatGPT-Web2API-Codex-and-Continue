@@ -30,7 +30,7 @@ try {
         Start-Process -FilePath $python -ArgumentList @('-u','-m','chatgpt_web2api','--config',('"'+$configFile+'"')) -WindowStyle Hidden -WorkingDirectory $PSScriptRoot -RedirectStandardOutput (Join-Path $logs 'stdout.log') -RedirectStandardError (Join-Path $logs 'stderr.log') | Out-Null
     }
     if (-not $ServiceOnly) {
-        $args=@('--user-data-dir',('"'+(Join-Path $PSScriptRoot 'vscode-data')+'"'),'--extensions-dir',('"'+(Join-Path $PSScriptRoot 'extensions')+'"'),'--new-window')
+        $args=@('--new-window')
         if ($Workspace) { $args+=('"'+$Workspace+'"') }
         else { $args+=('"'+(Join-Path $PSScriptRoot 'BIENVENUE.md')+'"') }
         Start-Process -FilePath (Join-Path $PSScriptRoot 'apps\vscode\Code.exe') -ArgumentList $args | Out-Null

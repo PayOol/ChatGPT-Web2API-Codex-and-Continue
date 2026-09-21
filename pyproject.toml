@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chatgpt-web2api"
-version = "0.3.2"
+version = "0.3.3"
 description = "OpenAI-compatible API proxy and MCP server for ChatGPT web — drives Chrome via CDP"
 readme = "README.md"
 requires-python = ">=3.11"

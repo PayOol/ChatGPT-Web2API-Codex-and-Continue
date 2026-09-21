@@ -4,7 +4,7 @@ Distribution privée regroupant ChatGPT-Web2API, les correctifs de notre intégr
 
 ## Installer
 
-1. Depuis [la dernière version](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/latest), télécharger **Web2API-Continue-Setup-0.3.2.exe**.
+1. Depuis [la dernière version](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/latest), télécharger **Web2API-Continue-Setup-0.3.3.exe**.
 2. Lancer ce fichier. Il télécharge les dépendances, installe l'éditeur et l'extension, applique tous les correctifs, écrit la configuration, crée les raccourcis et démarre l'environnement.
 3. À la première ouverture, se connecter à **son propre compte ChatGPT** dans le navigateur dédié, puis ouvrir son dossier de travail dans VS Code et choisir le mode Agent de Continue.
 
@@ -16,7 +16,7 @@ Alternative avec le code source : extraire l'archive puis lancer `Install.cmd`. 
 
 ## Progression de l'installation
 
-La version 0.3.2 affiche 21 étapes numérotées et horodatées : préparation, composants, Python, bibliothèques, outils, navigateur, Continue, correctifs, diagnostic, raccourcis et lancement. Chaque étape réussie indique sa durée. Le pourcentage global compte les étapes terminées ; il ne prédit pas la durée totale.
+Depuis la version 0.3.2, l’installateur affiche 21 étapes numérotées et horodatées : préparation, composants, Python, bibliothèques, outils, navigateur, Continue, correctifs, diagnostic, raccourcis et lancement. Chaque étape réussie indique sa durée. Le pourcentage global compte les étapes terminées ; il ne prédit pas la durée totale.
 
 Pour les archives téléchargées directement, l'installateur affiche la taille reçue, le débit moyen et, lorsque le serveur annonce une taille totale, le pourcentage et le temps restant estimé. Une taille inconnue est indiquée explicitement. La vérification SHA-256, l'extraction, la copie, la réutilisation du cache et les nouvelles tentatives sont visibles.
 
@@ -49,7 +49,15 @@ La conversation Agent passe par le navigateur ChatGPT connecté. Les comptes, co
 
 L'accès automatique des outils est activé comme dans l'environnement d'origine. `continue/full-access.local.json` permet de le désactiver (`enabled: false`). Les règles installées demandent de respecter les instructions de l'utilisateur, le dossier de travail et les autorisations des applications. Les commandes et le contrôle Windows ont les droits de l'utilisateur connecté.
 
-Chaque installation possède ses dossiers `continue`, `vscode-data`, `extensions`, `browser-profile`, `media`, `state`, `logs` et `backups`. Le VS Code habituel et sa configuration ne sont pas modifiés. Les ports libres sont choisis automatiquement au premier passage puis conservés ; les valeurs effectives figurent dans `installation.json`. L'API écoute sur `127.0.0.1`.
+Chaque installation possède ses dossiers `continue`, `browser-profile`, `media`, `state`, `logs` et `backups`. Le profil, les extensions et le stockage partagé de son éditeur se trouvent dans `apps/vscode/data/{user-data,extensions,shared-data}`. Le VS Code habituel et sa configuration ne sont pas modifiés. Les ports libres sont choisis automatiquement au premier passage puis conservés ; les valeurs effectives figurent dans `installation.json`. L'API écoute sur `127.0.0.1`.
+
+## Continue et modèle disponibles automatiquement
+
+La version 0.3.3 corrige la perte du profil au retour d’une connexion GitHub ou lors d’un lancement direct de `Code.exe`. L’éditeur utilise le [mode portable natif de VS Code](https://code.visualstudio.com/docs/setup/portable), et Continue retrouve la configuration de son installation même sans les variables du raccourci.
+
+Le titre de la fenêtre contient **Web2API Continue**. Dans cette fenêtre, Continue est déjà installé et **ChatGPT Web2API** est configuré pour les rôles chat, modification et application. Aucune installation manuelle de Continue ni connexion GitHub n’est nécessaire pour utiliser ce modèle local. Il faut seulement connecter son compte ChatGPT dans le navigateur dédié. Le VS Code habituel possède un profil distinct.
+
+À la désinstallation, les profils de l’éditeur sont déplacés hors du dossier des programmes, vers `vscode-data` et `vscode-shared-data`, pour les conserver avec les autres données personnelles.
 
 ## Réflexions longues de ChatGPT
 
@@ -59,7 +67,7 @@ Une interruption dans Continue ou la fermeture du client annule l'observation et
 
 Dans `config.json`, `request_timeout: 0` et les cinq paramètres `detector_*_timeout_seconds: 0` signifient « sans limite ». Une valeur positive réactive volontairement la limite correspondante en secondes. Le délai total éventuel couvre les deux phases d'attente sans repartir à zéro à l'apparition du message. Dans la configuration Continue installée, `requestOptions.timeout: 0` active l'attente sans minuteur du correctif local.
 
-Pour mettre à jour une installation 0.3.0 ou 0.3.1, fermer son éditeur puis lancer l'installateur 0.3.2 sur le même dossier. Les configurations remplacées sont sauvegardées et les comptes/profils sont conservés. Si le correctif est appliqué à une extension déjà chargée, recharger sa fenêtre VS Code pour charger le nouveau code.
+Pour mettre à jour une installation 0.3.0, 0.3.1 ou 0.3.2, fermer son éditeur puis lancer l’installateur 0.3.3 sur le même dossier. Les anciens dossiers gérés `vscode-data` et `extensions` sont migrés dans le profil portable. Deux profils existants ne sont jamais fusionnés silencieusement. Les configurations remplacées sont sauvegardées et les comptes/profils sont conservés. Si le correctif est appliqué à une extension déjà chargée, recharger sa fenêtre VS Code pour charger le nouveau code.
 
 ## Maintenance et développement
 

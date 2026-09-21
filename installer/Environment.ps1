@@ -1,4 +1,8 @@
 $installDirectory = $PSScriptRoot
+# Do not inherit the IPC endpoint, node-only mode or portable root of another editor.
+foreach ($name in @('VSCODE_IPC_HOOK_CLI','VSCODE_PORTABLE','ELECTRON_RUN_AS_NODE')) {
+    [Environment]::SetEnvironmentVariable($name,$null,'Process')
+}
 $environmentFile = Join-Path $installDirectory 'environment.json'
 if (-not (Test-Path -LiteralPath $environmentFile)) { throw 'Installation incomplete : relancer Repair.cmd.' }
 $runtimeEnvironment = Get-Content -LiteralPath $environmentFile -Raw | ConvertFrom-Json

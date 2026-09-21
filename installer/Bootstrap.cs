@@ -31,8 +31,8 @@ internal static class Bootstrap {
                 }
             }
             Console.Title = "Installation ChatGPT Web2API + Continue";
-            Console.WriteLine("Preparation de l'installateur 0.3.2 - verification de l'archive embarquee...");
-            string folder = extract ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Web2API-Continue-Setup", "0.3.2-" + Guid.NewGuid().ToString("N"));
+            Console.WriteLine("Preparation de l'installateur 0.3.3 - verification de l'archive embarquee...");
+            string folder = extract ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Web2API-Continue-Setup", "0.3.3-" + Guid.NewGuid().ToString("N"));
             if (Directory.Exists(folder)) throw new IOException("Le dossier d'extraction existe deja : " + folder);
             Directory.CreateDirectory(folder);
             using (Stream payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")) {

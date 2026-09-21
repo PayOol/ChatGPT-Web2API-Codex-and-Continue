@@ -18,7 +18,7 @@ def build(root: Path, output: Path):
         .decode()
         .split("\0")
     )
-    source = output / "ChatGPT-Web2API-Continue-0.3.2-source.zip"
+    source = output / "ChatGPT-Web2API-Continue-0.3.3-source.zip"
     with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for name in sorted(set(files)):
             if not name or not (root / name).is_file():
@@ -50,7 +50,7 @@ def build(root: Path, output: Path):
             encoding="utf-8",
         )
         compiler = Path(os.environ["WINDIR"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
-        target = output / "Web2API-Continue-Setup-0.3.2.exe"
+        target = output / "Web2API-Continue-Setup-0.3.3.exe"
         subprocess.run(
             [
                 str(compiler),

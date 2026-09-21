@@ -1,4 +1,15 @@
-# Validation de la distribution 0.3.2
+# Validation de la distribution 0.3.3
+
+## Profil portable et modèle Continue — 21 septembre 2026
+
+Le journal du PC utilisateur a montré qu’un retour OAuth relançait l’exécutable géré sans ses arguments de profil ni les variables du lanceur. Cette fenêtre utilisait alors le profil VS Code habituel : l’extension installée par le programme et son modèle n’y étaient pas disponibles. Le correctif utilise les répertoires portables natifs de VS Code et un résolveur de configuration lié au manifeste de l’installation.
+
+La réparation du PC a conservé les données personnelles. Un lancement direct sans variable `CONTINUE_GLOBAL_DIR` a activé Continue dans le profil portable. L’utilisateur a confirmé dans l’interface : « Oui, le modèle apparaît ». Les cinq serveurs MCP ont de nouveau démarré et exposé leurs 67 outils. Cette vérification n’envoie aucune nouvelle requête au compte ChatGPT.
+
+Les régressions vérifient la migration des anciens profils, l’idempotence, la préservation des profils lors de la désinstallation/réinstallation, le refus de fusionner deux profils existants, le chargement des variables et outils sans le lanceur et le refus d’appliquer le résolveur à une extension extérieure.
+
+Le workflow d’installation lance désormais le véritable éditeur avec l’API de test des extensions VS Code, sans variables ni arguments du profil géré. Il exige l’activation de Continue, le chargement du modèle `ChatGPT Web2API` depuis son véritable gestionnaire de configuration, la bonne URL locale et le bon profil. Il ne simule pas un parcours OAuth avec un compte : il couvre son défaut déclencheur, le lancement sans environnement du raccourci. Son rapport est conservé dans `editor-runtime.json`.
+
 
 ## Progression de l'installateur — 21 septembre 2026
 

@@ -17,7 +17,7 @@ spec.loader.exec_module(setup)
 
 
 def extension_fixture(root):
-    extension = root / "extensions/continue.continue-2.0.0"
+    extension = root / "apps/vscode/data/extensions/continue.continue-2.0.0"
     extension.mkdir(parents=True)
     (extension / "package.json").write_text('{"version":"2.0.0"}')
     targets = {}
@@ -25,6 +25,7 @@ def extension_fixture(root):
         "continue-full-access-changes.json",
         "continue-auto-compaction-changes.json",
         "continue-long-wait-changes.json",
+        "continue-managed-profile-changes.json",
     ]:
         for change in json.loads((SOURCE / "integration/continue" / name).read_text()):
             targets.setdefault(change["file"], []).append(change["before"])
