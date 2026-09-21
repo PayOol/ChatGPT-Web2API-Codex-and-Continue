@@ -62,7 +62,9 @@ class SessionHTTPTests(unittest.IsolatedAsyncioTestCase):
         r = await self.client.post("/v1/chat/completions", json=body(messages=history))
         await r.read()
         self.assertEqual(self.driver.navigations, 1)
-        self.assertNotIn("Read demo.py", self.driver.prompts[1])
+        self.assertIn("Active user request already supplied", self.driver.prompts[1])
+        self.assertIn("Read demo.py", self.driver.prompts[1])
+        self.assertNotIn('"role":"system"', self.driver.prompts[1])
 
     async def test_changed_prior_history_starts_fresh(self):
         history = await self.first_call()
@@ -85,7 +87,10 @@ class SessionHTTPTests(unittest.IsolatedAsyncioTestCase):
         r = await self.client.post("/v1/chat/completions", json=body(messages=history))
         await r.read()
         self.assertEqual(self.driver.navigations, 3)
-        self.assertNotIn("Read demo.py", self.driver.prompts[-1])
+        self.assertIn("Active user request already supplied", self.driver.prompts[-1])
+        self.assertIn("Read demo.py", self.driver.prompts[-1])
+        self.assertNotIn("Apply this code", self.driver.prompts[-1])
+        self.assertNotIn('"role":"system"', self.driver.prompts[-1])
 
     async def test_uncertain_send_blocks_all_client_retries(self):
         self.driver.answers = [SendReadinessError("Send not acknowledged")]

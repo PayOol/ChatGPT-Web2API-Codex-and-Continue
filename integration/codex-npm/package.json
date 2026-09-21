@@ -1,6 +1,6 @@
 {
   "name": "web2api-codex-runtime",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "dependencies": {
     "@bitkyc08/opencodex": "2.59.0",

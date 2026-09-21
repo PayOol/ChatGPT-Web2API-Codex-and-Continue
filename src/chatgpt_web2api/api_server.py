@@ -463,7 +463,7 @@ class APIServer:
                 except (ValueError, OSError) as exc:
                     raise ToolRequestError(str(exc)) from exc
                 if tool_bridge:
-                    full_text = tool_bridge.prompt(messages[offset:])
+                    full_text = tool_bridge.prompt(messages[offset:], prior_messages=messages[:offset])
                     if image_paths:
                         full_text = (
                             f"This request includes {len(image_paths)} actual attached image(s). "

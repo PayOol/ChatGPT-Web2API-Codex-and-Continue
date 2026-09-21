@@ -1,3 +1,9 @@
+# Distribution 0.4.2
+
+- Rappelle le contrat d'exécution des outils après les résultats et le catalogue pour limiter les réponses affirmant à tort que les outils du client ne sont pas accessibles.
+- Conserve une référence à la dernière demande utilisateur non vide dans les tours incrémentaux. Une nouvelle demande la remplace ; les longs contextes ne sont pas renvoyés et les actions terminées ne sont pas rejouées.
+- Couvre les reprises Continue avec messages vides, plusieurs appels successifs, les limites de contexte et les règles de permission. Le transport natif Codex reste inchangé.
+
 # Distribution 0.4.1
 
 - Corrige l’attente infinie lorsqu’une réponse ChatGPT terminée ignore le format attendu.

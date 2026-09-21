@@ -58,6 +58,45 @@ class ProtocolTests(unittest.TestCase):
     def test_plain_chat_not_wrapped(self):
         self.assertIsNone(ToolBridge.from_request({"messages": MESSAGES}))
 
+    def test_incremental_resume_keeps_latest_nonempty_user_request(self):
+        prior = MESSAGES + [
+            {"role": "user", "content": [{"type": "text", "text": "Read next.py too"}]},
+            {"role": "user", "content": []},
+            {"role": "user", "content": "  "},
+        ]
+        delta = [{"role": "tool", "tool_call_id": "call_next", "content": "next.py contents"}]
+        prompt = self.bridge.prompt(delta, prior_messages=prior)
+        self.assertIn("Read next.py too", prompt)
+        self.assertNotIn("Read demo.py", prompt)
+        self.assertIn('"tool_call_id":"call_next"', prompt)
+        self.assertGreater(prompt.index("Execution handoff:"), prompt.index("next.py contents"))
+        self.assertIn("already supplied for the matching call IDs", prompt)
+
+    def test_new_request_replaces_continuation_reminder(self):
+        delta = [{"role": "user", "content": "Stop reading. Explain the result only."}]
+        prompt = self.bridge.prompt(delta, prior_messages=MESSAGES)
+        self.assertNotIn("Read demo.py", prompt)
+        self.assertNotIn("Active user request already supplied", prompt)
+        self.assertIn(delta[0]["content"], prompt)
+
+    def test_large_prior_task_is_not_resent_or_truncated_into_an_instruction(self):
+        prior = [{"role": "user", "content": "START_OLD_TASK " + "x" * 200000 + " END_OLD_TASK"}]
+        delta = [{"role": "tool", "tool_call_id": "call_read", "content": "result " * 50000}]
+        original = copy.deepcopy(delta)
+        prompt = self.bridge.prompt(delta, prior_messages=prior)
+        self.assertLess(len(prompt), 180000)
+        self.assertNotIn("START_OLD_TASK", prompt)
+        self.assertNotIn("END_OLD_TASK", prompt)
+        self.assertIn("OUTPUT ABBREVIATED", prompt)
+        self.assertEqual(delta, original)
+
+    def test_none_choice_does_not_request_execution_and_real_limitations_are_preserved(self):
+        bridge = ToolBridge.from_request(body(tool_choice="none"))
+        prompt = bridge.prompt(MESSAGES)
+        self.assertNotIn("Execution handoff:", prompt)
+        content = "The tool reported permission denied. I cannot read this file."
+        self.assertEqual(bridge.parse(wrap(bridge, content=content))["content"], content)
+
     def test_codex_freeform_source_is_preserved_in_function_envelope(self):
         tools = [{"type": "function", "function": {
             "name": "exec", "description": "Run raw JavaScript; tools.exec_command is available.",
@@ -319,7 +358,9 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(call_id, self.driver.prompts[1])
         self.assertIn("return a+b", self.driver.prompts[1])
         self.assertEqual(self.driver.navigations, 1)
-        self.assertNotIn("Read demo.py", self.driver.prompts[1])
+        self.assertIn("Read demo.py", self.driver.prompts[1])
+        self.assertIn("Active user request already supplied", self.driver.prompts[1])
+        self.assertNotIn('"role":"system"', self.driver.prompts[1])
 
     async def test_stream_tool_call_has_index_and_finish_reason(self):
         self.driver.answers = [{"content": "Reading", "tool_calls": [CALL]}]
@@ -330,6 +371,35 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_events[0]["choices"][0]["delta"]["tool_calls"][0]["index"], 0)
         self.assertEqual(events[-1]["choices"][0]["finish_reason"], "tool_calls")
         self.assertTrue(data.endswith("data: [DONE]\n\n"))
+
+    async def test_three_tool_rounds_keep_task_and_only_new_results(self):
+        history = MESSAGES + [{"role": "user", "content": []}]
+        self.driver.answers = [
+            {"content": None, "tool_calls": [CALL]},
+            {"content": None, "tool_calls": [CALL]},
+            {"content": None, "tool_calls": [CALL]},
+            {"content": "All three results checked", "tool_calls": []},
+        ]
+        ids = []
+        for turn in range(4):
+            response = await self.client.post("/v1/chat/completions", json=body(messages=history))
+            self.assertEqual(response.status, 200)
+            result = (await response.json())["choices"][0]
+            prompt = self.driver.prompts[-1]
+            self.assertIn("Read demo.py", prompt)
+            if turn:
+                self.assertIn(ids[-1], prompt)
+                self.assertIn(f"ONLY_RESULT_{turn - 1}", prompt)
+                for older in range(turn - 1):
+                    self.assertNotIn(f"ONLY_RESULT_{older}", prompt)
+            if turn == 3:
+                self.assertEqual(result["finish_reason"], "stop")
+                break
+            self.assertEqual(result["finish_reason"], "tool_calls")
+            msg = result["message"]
+            ids.append(msg["tool_calls"][0]["id"])
+            history += [msg, {"role": "tool", "tool_call_id": ids[-1], "content": f"ONLY_RESULT_{turn}"}]
+        self.assertEqual(self.driver.navigations, 1)
 
     async def test_unlimited_request_waits_and_delivers_only_validated_frame(self):
         original = self.driver.send_and_stream

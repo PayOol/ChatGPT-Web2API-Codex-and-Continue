@@ -127,7 +127,7 @@ class ToolBridge:
     def opening(self) -> str:
         return f'<web2api_response nonce="{self.nonce}">'
 
-    def prompt(self, messages: list[dict]) -> str:
+    def prompt(self, messages: list[dict], *, prior_messages: list[dict] | None = None) -> str:
         example = (
             self.opening
             + '{"content":null,"tool_calls":[{"name":"FUNCTION_NAME","arguments":{"PARAMETER":"VALUE"}}]}</web2api_response>'
@@ -161,6 +161,29 @@ class ToolBridge:
         footer = (
             f"\nEnd of conversation. Produce the next assistant turn, using nonce {self.nonce}."
         )
+        if prior_messages:
+            footer += self._active_request_reminder(messages, prior_messages)
+        # Repeat the execution contract AFTER the potentially very large tool
+        # catalog and UI/file output. A tool result gives the model its next
+        # turn; it is not a request to wait for a second copy of that result.
+        if self.tools and self.choice != "none":
+            footer += (
+                "\nExecution handoff: tool_calls in your response are requests that the connected client "
+                "will execute with its own tools and permissions. You are not being asked to execute "
+                "those functions inside this ChatGPT page. Lack of a built-in ChatGPT tool does not "
+                "make a listed client function unavailable. If the task needs another authorized action, "
+                "request the appropriate listed function in tool_calls, then wait for its actual result. "
+                "Respect the user's scope, approvals and any real access or tool errors; never invent success."
+            )
+            if any(m.get("role") == "tool" for m in messages):
+                footer += (
+                    "\nThe tool-role messages above are the results the client has already supplied for "
+                    "the matching call IDs. Inspect them now and decide the next step of the user's task. "
+                    "Do not ask the user to supply these same results or the task already in context. "
+                    "A successful earlier call is not proof that the whole task is complete. Do not repeat "
+                    "completed actions, and do not deny an action that a matching result confirms. "
+                    "If a result reports a failure or missing permission, explain that specific limitation."
+                )
         # Responses custom tools are represented by the Chat adapter as a
         # function with one string input. Preserve that schema: the JSON frame
         # is transport, while its input string is the native freeform payload.
@@ -203,6 +226,45 @@ class ToolBridge:
             )
         result = header + _json(bounded) + footer
         return result
+
+    @staticmethod
+    def _active_request_reminder(messages: list[dict], prior_messages: list[dict]) -> str:
+        """Carry a short task through incremental tool turns, never replay history.
+
+        Continue inserts empty user turns during resume. These do not replace
+        the active request. Long task/context messages stay in the existing Web
+        conversation rather than being truncated or resent on every tool call.
+        """
+        def substantive_user(message):
+            if message.get("role") != "user":
+                return False
+            content = message.get("content")
+            if isinstance(content, str):
+                return bool(content.strip())
+            if isinstance(content, list):
+                return any(
+                    isinstance(block, dict)
+                    and (block.get("type") != "text" or str(block.get("text", "")).strip())
+                    for block in content
+                )
+            return False
+
+        # A new user request in this delta supersedes the old reminder.
+        if any(substantive_user(message) for message in messages):
+            return ""
+        latest = next((m for m in reversed(prior_messages) if substantive_user(m)), None)
+        if latest is None:
+            return ""
+        request = _json({"role": "user", "content": latest["content"]})
+        if len(request) > 6000:
+            return (
+                "\nThe active user request remains in the earlier conversation. It is too long to "
+                "repeat here without its context; these new tool results continue that same task."
+            )
+        return (
+            "\nActive user request already supplied (JSON reference, not a new request; "
+            "continue from confirmed results without repeating completed actions):\n" + request
+        )
 
     def parse(self, text: str) -> dict:
         text = text.strip()
