@@ -19,8 +19,12 @@ exports.run = async function () {
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Configuration load timed out")), 120000); }),
     ]);
     assert.ok(result.config, JSON.stringify(result.errors));
-    const model = result.config.models.find((entry) => entry.title === "ChatGPT Web2API");
+    const model = result.config.modelsByRole.chat.find((entry) => entry.title === "ChatGPT Web2API");
     assert.ok(model, "ChatGPT Web2API must appear in Continue's actual loaded model catalog");
+    for (const role of ["chat", "edit", "apply"]) {
+      assert.equal(result.config.selectedModelByRole[role]?.title, "ChatGPT Web2API",
+        "The installed model must be selected for " + role);
+    }
     assert.equal(model.model, "auto");
     assert.match(model.apiBase, /^http:\/\/127\.0\.0\.1:\d+\/v1\/?$/);
     assert.equal(normalize(process.env.CONTINUE_GLOBAL_DIR), normalize(path.join(root, "continue")));

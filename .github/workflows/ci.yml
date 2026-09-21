@@ -70,6 +70,10 @@ jobs:
       - name: Launch the actual editor and load the Continue model without launcher environment
         run: python tests/editor_runtime.py --root "${{ runner.temp }}/Web2API test"
       - uses: actions/upload-artifact@v4
+        with:
+          name: Installer-tested-on-Windows
+          path: dist/*
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Installation-progress-log
