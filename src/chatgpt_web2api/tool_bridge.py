@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from jsonschema import validators
 from jsonschema.exceptions import SchemaError, ValidationError
 
+from .agent_completion import IncompleteTaskError, check_completion
 from .context_budget import fit_tool_outputs
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,10 @@ class ToolRequestError(ValueError):
 
 class ToolProtocolError(ValueError):
     """The model did not produce a valid tool response; execute nothing."""
+
+
+class TaskContinuationError(ToolProtocolError):
+    """The model ended its turn while explicitly announcing unfinished work."""
 
 
 def _json(value: object) -> str:
@@ -56,6 +61,7 @@ class ToolBridge:
     nonce: str = field(default_factory=lambda: uuid.uuid4().hex)
     _validators: dict = field(default_factory=dict, init=False, repr=False)
     context_stats: dict = field(default_factory=dict, init=False, repr=False)
+    _after_tool_result: bool = field(default=False, init=False, repr=False)
 
     @classmethod
     def from_request(cls, body: dict) -> ToolBridge | None:
@@ -75,6 +81,10 @@ class ToolBridge:
             body.get("tool_choice") or ("auto" if tools else "none"),
             body.get("parallel_tool_calls", True),
         )
+        latest = next((m for m in reversed(history) if not (
+            m.get("role") == "user" and m.get("content") in (None, "", " ", [])
+        )), {})
+        bridge._after_tool_result = latest.get("role") == "tool"
         if not isinstance(bridge.parallel, bool):
             raise ToolRequestError("parallel_tool_calls must be a boolean")
         for tool in tools:
@@ -130,9 +140,9 @@ class ToolBridge:
     def prompt(self, messages: list[dict], *, prior_messages: list[dict] | None = None) -> str:
         example = (
             self.opening
-            + '{"content":null,"tool_calls":[{"name":"FUNCTION_NAME","arguments":{"PARAMETER":"VALUE"}}]}</web2api_response>'
+            + '{"content":null,"tool_calls":[{"name":"FUNCTION_NAME","arguments":{"PARAMETER":"VALUE"}}],"task_status":"in_progress"}</web2api_response>'
         )
-        final = self.opening + '{"content":"Your final answer","tool_calls":[]}</web2api_response>'
+        final = self.opening + '{"content":"Your final answer","tool_calls":[],"task_status":"completed"}</web2api_response>'
         incremental = bool(prior_messages)
         if incremental:
             # The exact same web conversation already contains the full static
@@ -189,6 +199,17 @@ class ToolBridge:
         # turn; it is not a request to wait for a second copy of that result.
         if self.tools and self.choice != "none":
             footer += (
+                "\nTask completion contract: include task_status in every response. Use in_progress with actual "
+                "tool_calls while authorized work remains; use completed only when the user's requested scope "
+                "is done, or blocked with a precise explanation when a real obstacle or necessary user answer "
+                "prevents progress. A plan, progress update or promise to continue is NOT a completed task. "
+                "An empty tool_calls array ENDS the client's agent loop immediately: nothing runs after it. "
+                "If you say you will inspect, change or verify something now, request the next permitted tool "
+                "in this same response. Already supplied tool results require no further user message. "
+                "Before finishing, check the original request, follow-up instructions, remaining steps and "
+                "confirmed results. A failed search or read is not itself completion: use another permitted "
+                "approach when available. Respect stop requests, analysis-only scope and required approvals; "
+                "do not invent work or repeat completed actions to keep running."
                 "\nExecution handoff: tool_calls in your response are requests that the connected client "
                 "will execute with its own tools and permissions. You are not being asked to execute "
                 "those functions inside this ChatGPT page. Lack of a built-in ChatGPT tool does not "
@@ -196,8 +217,7 @@ class ToolBridge:
                 "request the appropriate listed function in tool_calls, then wait for its actual result. "
                 "Respect the user's scope, approvals and any real access or tool errors; never invent success."
             )
-            if not incremental:
-                footer += self._verification_reminder()
+            footer += self._verification_reminder(compact=incremental)
             if any(m.get("role") == "tool" for m in messages):
                 footer += (
                     "\nThe tool-role messages above are the results the client has already supplied for "
@@ -226,7 +246,14 @@ class ToolBridge:
                 "A top-level client tool and a nested tools method are different entry points. "
                 "Use only documented nested methods and obey the client's permissions and approval rules. "
             )
-            if not incremental:
+            if incremental:
+                footer += (
+                    "Exec runtime reminder: if this runtime documents ALL_TOOLS, it is a top-level global array listing deferred nested tools. "
+                    "Discover a needed method with ALL_TOOLS.filter(t => /keyword/.test(t.name)); text(matches); "
+                    "then call tools[exact_name]. Use text(...) or image(...) to return results. "
+                    "A 'not a function' result proves that entry point is wrong; never repeat it. "
+                )
+            else:
                 footer += (
                     "For an exec function exposing tools.exec_command, await it and return the result with text(...). "
                     "If this runtime documents ALL_TOOLS, it is a top-level global array, not tools.ALL_TOOLS. "
@@ -345,15 +372,25 @@ class ToolBridge:
             )
         return reminder
 
-    def _verification_reminder(self) -> str:
+    def _verification_reminder(self, *, compact: bool = False) -> str:
         """Ground access/state answers in observations, not the model's assumptions.
 
         Keep auto/none and the original schemas intact. This is a planning
         instruction, not a fabricated tool result or a blanket forced call.
         Only advertise discovery functions actually supplied by the client.
         """
-        reminder = (
-            "\nVerify before answering about this environment: when the user asks whether you can access "
+        if compact:
+            reminder = (
+                "\nVerify before answering about access: when the user asks whether you can access "
+                "their PC, a local app, MCP server, or service, use a listed read-only discovery tool FIRST, "
+                "unless current results already establish the answer or the user forbids inspection. "
+                "Do not answer from assumptions. Absence from the immediate tool list does not prove "
+                "absence from the PC; use the available discovery routes. If none is callable, explain that limitation. "
+                "Respect permissions; never perform a consequential action merely to test access."
+            )
+        else:
+            reminder = (
+                "\nVerify before answering about this environment: when the user asks whether you can access "
             "their PC, a local application, MCP server, connected service, file, or current state, use a "
             "relevant read-only discovery or diagnostic tool FIRST, unless matching current tool results "
             "already establish the answer or the user forbids inspection. This includes questions phrased "
@@ -370,7 +407,7 @@ class ToolBridge:
             "consequential action merely to test access. Respect user instructions and existing permissions. "
             "General explanations, translations, and answers already supported by current results need "
             "no artificial tool call."
-        )
+            )
         available = {t["function"]["name"] for t in self.tools}
         routes = {
             "connected_servers": "inspect providers exposed by the connected gateway and their reported status",
@@ -436,8 +473,10 @@ class ToolBridge:
             )
         except (ValueError, TypeError) as exc:
             raise ToolProtocolError("Response body is not valid JSON") from exc
-        if not isinstance(data, dict) or set(data) != {"content", "tool_calls"}:
-            raise ToolProtocolError("Response must contain only content and tool_calls")
+        if not isinstance(data, dict) or set(data) not in (
+            {"content", "tool_calls"}, {"content", "tool_calls", "task_status"}
+        ):
+            raise ToolProtocolError("Response must contain content and tool_calls, optionally task_status")
         content, calls = data["content"], data["tool_calls"]
         if content is not None and not isinstance(content, str):
             raise ToolProtocolError("content must be a string or null")
@@ -479,7 +518,17 @@ class ToolBridge:
         message = {"role": "assistant", "content": content}
         if converted:
             message["tool_calls"] = converted
+        self.validate_completion(message, data.get("task_status"))
         return message
+
+    def validate_completion(self, message: dict, status=None):
+        if not self.tools or self.choice == "none":
+            return
+        try:
+            check_completion(message.get("content"), message.get("tool_calls"), status,
+                             after_tool=self._after_tool_result)
+        except IncompleteTaskError as exc:
+            raise TaskContinuationError(str(exc)) from exc
 
     def validated_frame(self, text: str) -> str:
         """Read one complete nonce-bound frame, even before the Web stream closes.
@@ -507,10 +556,23 @@ class ToolBridge:
         return frame
 
     def repair_prompt(self, error: ToolProtocolError) -> str:
+        if isinstance(error, TaskContinuationError):
+            return (
+                f"Your previous progress-only response was not delivered or executed: {error}. "
+                "Reassess the user's full request using the conversation and tool results already supplied. "
+                "If authorized work remains, request its next actual tool now; do not merely promise to continue. "
+                "If the requested scope is genuinely complete, give the result; if blocked or awaiting a necessary "
+                "user decision, explain that specific obstacle. Respect stop requests and permissions. "
+                "Never repeat completed actions or fabricate results. This is the only correction attempt. "
+                f"Return ONLY {self.opening} followed by JSON with content, tool_calls and task_status "
+                "(in_progress with calls, completed, or blocked), then </web2api_response>, "
+                "all inside one fenced json code block."
+            )
         return (
             f"Your previous response was not delivered or executed: {error}. "
             "Correct its format using the same tool catalog and conversation. "
-            f"Return ONLY {self.opening} followed by JSON with content and tool_calls, then </web2api_response>. "
+            f"Return ONLY {self.opening} followed by JSON with content and tool_calls (and task_status: "
+            "in_progress with calls, completed, or blocked), then </web2api_response>. "
             "Enclose that entire response in one fenced code block labelled json, preserving every literal character. "
             "Do not repeat completed actions. No tool has executed from the rejected response."
         )

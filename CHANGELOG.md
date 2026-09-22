@@ -1,3 +1,12 @@
+# Distribution 0.4.10
+
+- Corrige les réponses Agent qui annoncent une poursuite du travail après un résultat d’outil mais terminent silencieusement le tour de Continue.
+- Ajoute un état explicite de tâche au protocole texte (en cours, terminé ou bloqué), retiré avant transmission au client OpenAI. Les anciens cadres restent compatibles ; les annonces directes de poursuite après un résultat bénéficient d’une vérification ciblée.
+- Demande au modèle une seule correction lorsqu’il annonce du travail restant sans appel d’outil. Aucun appel n’est inventé et les actions déjà exécutées ne sont pas rejouées. Un second échec est une erreur explicite, pas une réussite ni une boucle sans fin.
+- Conserve les demandes d’arrêt, les questions nécessaires, les blocages d’accès et les demandes d’analyse seule. Renforce la consigne Continue pour vérifier toute la demande avant de conclure.
+
+- Conserve aussi dans les tours incrémentaux le rappel de découverte des outils disponibles, avec les mêmes limites de permission et sans répéter les vérifications déjà concluantes.
+
 # Distribution 0.4.9
 
 - Maintient la passerelle Codex dans une tâche Windows appartenant à l’installation et au compte utilisateur, indépendante du processus de l’application Codex et relancée à chaque ouverture de session.

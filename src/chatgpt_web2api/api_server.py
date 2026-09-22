@@ -836,6 +836,7 @@ class APIServer:
                         source = await read_final(snapshot) if read_final else None
                         if source is not None:
                             message = final_text_message(source, bridge.choice)
+                            bridge.validate_completion(message)
                             logger.info(
                                 "Recovered verified final prose after format repair; no tool call accepted"
                             )
@@ -951,7 +952,7 @@ class APIServer:
             except ToolProtocolError as exc:
                 if repair_error:
                     raise
-                logger.warning("Agent response requires format repair: %s", exc)
+                logger.warning("Agent response requires format or continuation repair: %s", exc)
                 await self._agent_state.reserve()
                 answer = await collect(bridge.repair_prompt(exc), repair=True)
                 message = bridge.parse(answer)

@@ -1,3 +1,17 @@
+# Validation de la distribution 0.4.10
+
+## Poursuite des tâches Continue — 22 septembre 2026
+
+Le cas signalé a été retrouvé dans la session locale de Continue : le dernier résultat de recherche était présent, puis le modèle a renvoyé une annonce de travail restant avec une liste d’outils vide. La passerelle a donc émis une fin normale, `finish_reason=stop`. Aucune coupure du service n’expliquait cet arrêt.
+
+Le contrat indique maintenant explicitement qu’une liste vide termine le tour Agent et demande au modèle un état `in_progress`, `completed` ou `blocked`. Une réponse en cours sans appel déclenche une correction unique. Les cadres anciens restent compatibles ; une vérification ciblée repère aussi les promesses directes de poursuite en français et en anglais après des résultats d’outils. Les cadres d’outils, permissions et identifiants OpenAI restent inchangés. L’état est interne au transport et n’est pas envoyé comme un champ supplémentaire au client.
+
+Les tests de régression reproduisent les phrases signalées, la reprise par un véritable appel validé, le résultat suivant puis la conclusion, le renvoi idempotent avec les mêmes identifiants, les erreurs après deux réponses incomplètes, les questions et blocages légitimes, le mode sans outils et les réponses d’analyse seule. La vérification du format s’applique aussi aux réponses finales récupérées.
+
+Un essai réel de la passerelle Continue installée, avec ChatGPT Web et des outils de lecture contrôlés, a enchaîné trois lectures dépendantes puis retourné exactement `TOTAL=80` au quatrième tour, sans intervention humaine entre les étapes. Durées observées : 17,75 s, 7,06 s, 7,61 s, puis 7,40 s. Les contenus d’outils de cet essai sont des fixtures de test ; cela valide la boucle de transport réelle, pas l’audit Laravel du projet de l’utilisateur. La passerelle Continue a été mise à jour avec sauvegarde et redémarrée uniquement lorsqu’aucune requête n’était active.
+
+Cette protection ne démontre pas automatiquement qu’une tâche arbitraire est entièrement accomplie : la qualité de la planification reste celle du modèle. Les arrêts justifiés sont conservés et le nombre de corrections est borné. La suite complète, le lint et les installations Windows des deux cibles sont publiés dans le workflow associé au commit de cette version.
+
 # Validation de la distribution 0.4.9
 
 ## Persistance Codex et découverte des outils — 22 septembre 2026

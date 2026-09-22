@@ -1,10 +1,10 @@
-# ChatGPT Web2API 0.4.9 — Codex integration
+# ChatGPT Web2API 0.4.10 — Codex integration
 
 The Codex target adds `chatgpt-web2api/auto` through OpenCodex's supported local management API. It leaves model selection to the user. It does not patch Codex, replace installed packages, change the default provider, add a native alias/combo, or configure tools, permissions, approval policy, global guidance, Fast mode or `codexToolMode`.
 
 ## Two installer targets
 
-The [0.4.9 release](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/tag/v0.4.9) offers **Codex** or **Continue**. Codex defaults to `%LOCALAPPDATA%/Programs/Web2API-Codex`; Continue defaults to `%LOCALAPPDATA%/Programs/Web2API-Continue`. The target is recorded in `installation.json`, and repair keeps that target. Do not reuse one target's root for the other.
+The [0.4.10 release](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/tag/v0.4.10) offers **Codex** or **Continue**. Codex defaults to `%LOCALAPPDATA%/Programs/Web2API-Codex`; Continue defaults to `%LOCALAPPDATA%/Programs/Web2API-Continue`. The target is recorded in `installation.json`, and repair keeps that target. Do not reuse one target's root for the other.
 
 The Codex branch uses Codex's native tool surface and existing permissions. It does not install the Continue Local, Browser, Computer, Vision or Connected MCP servers, Hostinger MCP, Continue extension patches, or a universal set of app connections. The native application is reused or installed through its official Microsoft Store package; its own tools, plugins, authentication and updates remain under Codex's control. These are installation contracts, not a claim of completed live validation.
 
