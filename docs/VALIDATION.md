@@ -1,3 +1,15 @@
+# Validation de la distribution 0.4.11
+
+## Computer Use Codex — 22 septembre 2026
+
+La tâche signalée a été retrouvée dans les journaux Codex. Le modèle avait correctement découvert `mcp__node_repl__js`, initialisé `@oai/sky`, listé les fenêtres et activé WhatsApp. Il avait ensuite essayé plusieurs signatures incorrectes, sérialisé toute une capture JPEG dans du texte base64, répété la découverte, puis conclu à tort que `exec` et Computer Use n’étaient pas accessibles. Quatorze requêtes ChatGPT et environ trois minutes avaient ainsi produit une réponse négative malgré des résultats d’outils réussis.
+
+La passerelle associe désormais les résultats aux appels `exec` correspondants et mémorise, pour le tour courant, la disponibilité vérifiée de Computer Use et l’observation réussie d’une fenêtre. La validation refuse avant exécution les signatures incorrectes, les méthodes `sky.*` absentes de l’API installée, les objets `Window` reconstruits, une capture envoyée comme texte, une redécouverte après preuve et plusieurs entrées d’interface sans nouvel état. Une conclusion qui nie `exec` ou Computer Use après un résultat réussi reçoit l’unique correction de protocole au lieu d’être renvoyée à Codex comme résultat final.
+
+Les contrôles réels ont utilisé deux niveaux de preuve distincts. Une requête Web2API sans outil a renvoyé exactement `WEB2API_OK` après le redémarrage. Une continuation Responses contenant un résultat `list_windows` réussi a ensuite produit l’appel attendu : `get_window({id,app})`, `get_window_state({window,...})`, `nodeRepl.emitImage(...)` et transfert de `image(block)`. Enfin, le même runtime Computer Use a listé les fenêtres réelles et capturé WhatsApp en lecture seule ; la capture affichait « Lucious Novachrono ». Aucun clic, aucune saisie et aucun envoi n’a été effectué.
+
+La suite locale complète a réussi avec **1 147 tests**, **33 sous-tests**, un test ignoré et 32 scénarios E2E explicitement exclus. Ruff et `git diff --check` réussissent. Cette preuve établit le transport, la validation et la capture en lecture seule ; elle ne prétend pas qu’un message WhatsApp a été envoyé. Un envoi reste une action externe soumise à la confirmation exigée par le client au moment de l’action.
+
 # Validation de la distribution 0.4.10
 
 ## Poursuite des tâches Continue — 22 septembre 2026

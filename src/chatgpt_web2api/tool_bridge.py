@@ -53,6 +53,86 @@ def _no_external_refs(value: object) -> None:
             _no_external_refs(item)
 
 
+def _content_text(value: object) -> str:
+    """Flatten a client tool result without treating it as instructions."""
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list):
+        return _json(value)
+    parts = []
+    for item in value:
+        if not isinstance(item, dict):
+            parts.append(str(item))
+            continue
+        text = item.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+        else:
+            parts.append(_json(item))
+    return "\n".join(parts)
+
+
+def _exec_source(call: dict) -> str:
+    fn = call.get("function") or {}
+    name = fn.get("name", "")
+    if name != "exec" and not str(name).endswith("__exec"):
+        return ""
+    arguments = fn.get("arguments", {})
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except (TypeError, ValueError):
+            return ""
+    if not isinstance(arguments, dict):
+        return ""
+    source = arguments.get("input", "")
+    return source if isinstance(source, str) else ""
+
+
+def _is_computer_use_source(source: str) -> bool:
+    return bool(source) and (
+        "@oai/sky" in source
+        or "globalThis.sky" in source
+        or re.search(r"Object\.keys\(\s*sky\s*\)", source) is not None
+        or re.search(r"\bsky\s*\.", source) is not None
+    )
+
+
+def _tool_result_failed(result: str) -> bool:
+    compact = re.sub(r"\s+", "", result).lower()
+    return (
+        '"iserror":true' in compact
+        or "scriptfailed" in compact
+        or '"status":"failed"' in compact
+    )
+
+
+def _tool_result_succeeded(source: str, result: str) -> bool:
+    if _tool_result_failed(result):
+        return False
+    compact = re.sub(r"\s+", "", result).lower()
+    if '"iserror":false' in compact:
+        return True
+    if "sky.list_windows" in source:
+        return '"app"' in compact and '"id"' in compact
+    if "sky.get_window_state" in source:
+        return any(marker in compact for marker in ('"screenshots"', "screenshotid", "toolimagesha256"))
+    if "sky.activate_window" in source:
+        return "activated" in compact or "activ" in compact
+    return "scriptcompleted" in compact
+
+
+def _denies_verified_computer_use(content: str) -> bool:
+    patterns = (
+        r"je n['’]ai pas acc[eè]s.{0,100}(?:\bexec\b|computer use|outil)",
+        r"je ne peux pas (?:ex[eé]cuter|utiliser).{0,100}(?:\bexec\b|computer use|outil externe)",
+        r"aucun outil.{0,60}(?:computer use|\bexec\b).{0,60}disponible",
+        r"(?:cannot|can't|unable to) (?:execute|use|access).{0,100}(?:\bexec\b|computer use|external tool)",
+        r"no .{0,60}(?:computer use|\bexec\b).{0,60}(?:available|access)",
+    )
+    return any(re.search(pattern, content or "", re.I | re.S) for pattern in patterns)
+
+
 @dataclass
 class ToolBridge:
     tools: list[dict]
@@ -62,6 +142,9 @@ class ToolBridge:
     _validators: dict = field(default_factory=dict, init=False, repr=False)
     context_stats: dict = field(default_factory=dict, init=False, repr=False)
     _after_tool_result: bool = field(default=False, init=False, repr=False)
+    _computer_use_verified: bool = field(default=False, init=False, repr=False)
+    _computer_use_observed: bool = field(default=False, init=False, repr=False)
+    _last_computer_use_result_failed: bool = field(default=False, init=False, repr=False)
 
     @classmethod
     def from_request(cls, body: dict) -> ToolBridge | None:
@@ -121,6 +204,7 @@ class ToolBridge:
         # Match every tool result to a preceding assistant call. Never drop a
         # tool result or mislabel it as an instruction from the user.
         known_ids: set[str] = set()
+        known_calls: dict[str, dict] = {}
         for message in history:
             calls = message.get("tool_calls") or []
             if not isinstance(calls, list):
@@ -129,8 +213,20 @@ class ToolBridge:
                 if not isinstance(call, dict) or not isinstance(call.get("id"), str):
                     raise ToolRequestError("Historical tool calls require an id")
                 known_ids.add(call["id"])
-            if message.get("role") == "tool" and message.get("tool_call_id") not in known_ids:
-                raise ToolRequestError("Tool result has no matching prior tool_call_id")
+                known_calls[call["id"]] = call
+            if message.get("role") == "tool":
+                call_id = message.get("tool_call_id")
+                if call_id not in known_ids:
+                    raise ToolRequestError("Tool result has no matching prior tool_call_id")
+                source = _exec_source(known_calls[call_id])
+                if _is_computer_use_source(source):
+                    result = _content_text(message.get("content", ""))
+                    failed = _tool_result_failed(result)
+                    bridge._last_computer_use_result_failed = failed
+                    if _tool_result_succeeded(source, result):
+                        bridge._computer_use_verified = True
+                        if "sky.get_window_state" in source:
+                            bridge._computer_use_observed = True
         return bridge
 
     @property
@@ -341,15 +437,22 @@ class ToolBridge:
             "If the guide documents @oai/sky, initialize it in node_repl once with "
             "if (!globalThis.sky) { const { sky } = await import(\"@oai/sky\"); globalThis.sky = sky; }. "
             "Use nodeRepl.write(JSON.stringify(await sky.list_windows())) for a read-only check. "
-            "Critical sky API signatures: every method takes a Window object {app:string, id:number}. "
-            "sky.list_windows() returns Window[]. sky.get_window({id}) returns Window. "
-            "sky.get_window_state({window:Window, include_screenshot?:bool, include_text?:bool}) returns state+screenshot. "
-            "sky.click({window:Window, x?, y?, element_index?}) clicks. sky.type_text({window:Window, text:string}) types. "
-            "sky.press_key({window:Window, key:string}) presses keys. sky.scroll({window:Window, x, y, delta_x?, delta_y?}) scrolls. "
-            "sky.activate_window({window:Window}) brings window to front. sky.list_apps() lists installed apps+windows. "
-            "Always pass the full Window object from list_windows/list_apps, never just an id number. "
-            "Workflow: list_windows -> pick window -> get_window_state({window:W, include_text:true, include_screenshot:true}) -> read accessibility text to find the target element -> click({window:W, element_index:N}) or click({window:W, x:X, y:Y}) -> type_text({window:W, text:\"....\"}) -> press_key({window:W, key:\"Return\"}) to send. Combine multiple sequential sky calls in ONE exec call to minimize round trips. Example: const W={app:\"..\",id:N}; await sky.activate_window({window:W}); const st=await sky.get_window_state({window:W,include_text:true}); nodeRepl.write(JSON.stringify(st.accessibility)); — then in the NEXT call, click the found element and type+send in one shot. Two exec calls should suffice for most single-app tasks: one to inspect, one to act. "
-            "The node_repl session persists. Follow the guide for selecting a returned window and further actions. "
+            "sky is the Computer Use client. Select exactly one Window object returned by list_windows/list_apps; "
+            "never reconstruct it from guessed fields. Every state/input method takes {window:Window}; "
+            "get_window takes {id,app}, launch_app takes {app}, and list_apps/list_windows take no arguments. "
+            "The observation method is get_window_state; sky.observe and sky.capture do not exist. "
+            "Store persistent values on globalThis to avoid redeclaration retries. "
+            "Use the documented two-step loop: observe and STOP so the pixels/tree can be inspected, then perform "
+            "exactly one state-derived input and refresh state immediately. Never batch click, typing and submit. "
+            "For accessibility, request {window:targetWindow,include_screenshot:false,include_text:true} and write "
+            "only state.accessibility.tree/document_text. For pixels, request {window:targetWindow,"
+            "include_screenshot:true,include_text:false}; inside node_repl call "
+            "await nodeRepl.emitImage(state.screenshots[0].url), then in exec forward each image block with "
+            "image(block) and text blocks with text(block.text). Never text(JSON.stringify(result)) or stringify "
+            "the whole WindowState: that turns the JPEG into unusable base64 text. After each click/type/key input, "
+            "capture and inspect a fresh state before choosing another input. Sending a message is representational "
+            "communication: obtain the required action-time confirmation immediately before the send key/click. "
+            "The node_repl session persists. Follow the installed guide rather than guessing method signatures. "
             "A restriction of cua's browser API applies to that API; it does not disable an independently "
             "advertised Windows plugin. Never invent a method or bypass a disabled capability. "
             "If discovery is empty or initialization fails, report that actual result and its scope. "
@@ -367,20 +470,16 @@ class ToolBridge:
                 "The supplied tool history already proves tools.mcp__cua_repl__js is unavailable here; "
                 "do not call it again. Use the node_repl route only if the real catalog advertises it. "
             )
-        sky_ready_markers = (
-            '"skyType":"object"',
-            '"hasSky":"object"',
-            '"skyKeys"',
-            '"target":"windows"',
-            '"list_windows"',
-            'WhatsApp',
-        )
-        if any(marker in tool_results for marker in sky_ready_markers):
+        if self._computer_use_verified:
             reminder += (
-                "The supplied results already prove that the persistent sky Computer Use object is ready. "
-                "sky IS Computer Use. A successful sky.list_windows() proves Computer Use is fully available. "
-                "Stop all discovery and inspection. Proceed to get_window_state and then act. "
-                "Do NOT conclude that Computer Use is unavailable after a successful sky call. "
+                "Current matched tool results prove that exec and persistent sky Computer Use are available. "
+                "Do not list methods, re-import sky, repeat list_windows, or claim either capability is unavailable. "
+                "Continue from the returned Window and the active user request. "
+            )
+        if self._computer_use_observed:
+            reminder += (
+                "A successful WindowState was already returned. Inspect its attached pixels or accessibility text, "
+                "choose the next single input, then refresh. Do not fall back to capability discovery. "
             )
         return reminder
 
@@ -471,6 +570,127 @@ class ToolBridge:
             "continue from confirmed results without repeating completed actions):\n" + request
         )
 
+    def _validate_exec_input(self, name: str, arguments: dict) -> None:
+        """Reject observed Computer Use protocol errors before the client executes them."""
+        if name != "exec" and not name.endswith("__exec"):
+            return
+        source = arguments.get("input", "")
+        if not isinstance(source, str) or not _is_computer_use_source(source):
+            return
+        compact = re.sub(r"\s+", "", source)
+
+        discovery_only = (
+            "sky.list_windows(" in compact
+            or "Object.keys(sky" in compact
+            or "Object.keys(globalThis.sky" in compact
+        ) and not any(
+            method in compact
+            for method in (
+                "sky.get_window_state(", "sky.click(", "sky.type_text(",
+                "sky.press_key(", "sky.set_value(", "sky.drag(", "sky.scroll(",
+            )
+        )
+        if (
+            self._computer_use_verified
+            and not self._last_computer_use_result_failed
+            and discovery_only
+        ):
+            raise ToolProtocolError(
+                "A matched successful sky result already proves Computer Use is available. "
+                "Do not repeat list_windows or inspect Object.keys(sky); use the returned Window "
+                "to observe the target UI and continue the active task."
+            )
+
+        if re.search(r"sky\.get_window\((?!\{)", compact):
+            raise ToolProtocolError(
+                "sky.get_window requires one object: sky.get_window({id, app}); "
+                "do not pass a bare id."
+            )
+
+        assigned_objects = re.findall(
+            r"(?:globalThis\.)?[A-Za-z_$][A-Za-z0-9_$]*=\{([^{}]*)\}", compact
+        )
+        if any("app:" in value and "id:" in value for value in assigned_objects):
+            raise ToolProtocolError(
+                "Do not reconstruct a Window with a manual {app, id} object. Reuse the exact Window "
+                "returned by list_windows/list_apps, store it on globalThis, or rehydrate it with "
+                "await sky.get_window({id, app}) before passing it as {window: targetWindow}."
+            )
+
+        supported_methods = {
+            "list_windows", "get_window", "list_apps", "launch_app", "get_window_state",
+            "click", "press_key", "type_text", "scroll", "set_value", "drag",
+            "perform_secondary_action", "activate_window",
+        }
+        requested_methods = set(re.findall(r"sky\.([A-Za-z_$][A-Za-z0-9_$]*)\(", compact))
+        unsupported = sorted(requested_methods - supported_methods)
+        if unsupported:
+            raise ToolProtocolError(
+                "Unsupported @oai/sky method(s): " + ", ".join(unsupported) + ". "
+                "Use only list_windows, get_window, list_apps, launch_app, get_window_state, "
+                "click, press_key, type_text, scroll, set_value, drag, "
+                "perform_secondary_action, or activate_window. To observe pixels or text, "
+                "use sky.get_window_state({window: Window, ...}); sky.observe does not exist."
+            )
+
+        window_methods = (
+            "get_window_state", "activate_window", "click", "press_key", "type_text",
+            "scroll", "set_value", "drag", "perform_secondary_action",
+        )
+        for method in window_methods:
+            for match in re.finditer(rf"sky\.{method}\(\{{(.*?)\}}\)", compact, re.S):
+                if "window:" not in match.group(1):
+                    raise ToolProtocolError(
+                        f"sky.{method} requires {{window: Window, ...}} using the exact Window "
+                        "returned by list_windows/list_apps or state.window."
+                    )
+
+        if "sky.get_window_state(" in compact:
+            accessibility = "include_text:true" in compact
+            screenshot_disabled = "include_screenshot:false" in compact
+            emits_image = (
+                "nodeRepl.emitImage(" in compact
+                and re.search(r"(?<![A-Za-z0-9_])image\(", compact) is not None
+            )
+            stringifies_state = re.search(
+                r"JSON\.stringify\((?:globalThis\.)?(?:state|\w*State)\)", compact
+            ) is not None
+            if accessibility and not screenshot_disabled and not emits_image:
+                raise ToolProtocolError(
+                    "For an accessibility observation use include_screenshot:false, include_text:true "
+                    "and return only tree/document_text. Request pixels separately when needed."
+                )
+            if not accessibility and not emits_image:
+                raise ToolProtocolError(
+                    "A screenshot observation must call nodeRepl.emitImage(state.screenshots[0].url) "
+                    "inside node_repl and forward returned image blocks with image(block) in exec. "
+                    "Do not serialize screenshot data as text."
+                )
+            if stringifies_state and not screenshot_disabled:
+                raise ToolProtocolError(
+                    "Do not JSON.stringify the whole WindowState: it embeds the JPEG as base64 text. "
+                    "Return only small metadata/text and forward pixels with image(block)."
+                )
+
+        action_methods = (
+            "click", "press_key", "type_text", "scroll", "set_value", "drag",
+            "perform_secondary_action",
+        )
+        actions = []
+        for method in action_methods:
+            actions.extend((match.start(), method) for match in re.finditer(rf"sky\.{method}\(", compact))
+        actions.sort()
+        if len(actions) > 1:
+            raise ToolProtocolError(
+                "Computer Use permits one state-derived input per observation. Request one click/type/key "
+                "now, refresh WindowState, inspect the result, then choose the next input."
+            )
+        if actions and "sky.get_window_state(" not in compact[actions[0][0]:]:
+            raise ToolProtocolError(
+                "After a Computer Use input, refresh WindowState in the same node_repl call so the "
+                "outcome is observed before any next action."
+            )
+
     def parse(self, text: str) -> dict:
         text = text.strip()
         if text.startswith("```json\n") and text.endswith("\n```"):
@@ -520,6 +740,7 @@ class ToolBridge:
                 raise ToolProtocolError(
                     f"Invalid {name} arguments at {path}: {exc.validator}"
                 ) from exc
+            self._validate_exec_input(name, arguments)
             converted.append(
                 {
                     "id": "call_" + uuid.uuid4().hex[:24],
@@ -536,6 +757,18 @@ class ToolBridge:
     def validate_completion(self, message: dict, status=None):
         if not self.tools or self.choice == "none":
             return
+        if (
+            self._after_tool_result
+            and self._computer_use_verified
+            and not message.get("tool_calls")
+            and _denies_verified_computer_use(message.get("content") or "")
+        ):
+            raise TaskContinuationError(
+                "Matched successful exec/sky results prove Computer Use is available in this session. "
+                "Do not claim exec or Computer Use is unavailable. Continue with the next permitted "
+                "observation/action, request any mandatory confirmation, or report a specific current "
+                "tool error without denying the verified capability."
+            )
         try:
             check_completion(message.get("content"), message.get("tool_calls"), status,
                              after_tool=self._after_tool_result)

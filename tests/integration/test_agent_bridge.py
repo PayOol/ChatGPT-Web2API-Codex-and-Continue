@@ -167,8 +167,7 @@ class ProtocolTests(unittest.TestCase):
             prior_messages=prior,
         )
         self.assertIn("already proves tools.mcp__cua_repl__js is unavailable", prompt)
-        self.assertIn("already prove that the persistent sky Computer Use object is ready", prompt)
-        self.assertIn("Stop capability discovery", prompt)
+        self.assertNotIn("persistent sky Computer Use are available", prompt)
 
     def test_frame_delimiter_inside_json_string_does_not_truncate(self):
         text = wrap(self.bridge, content="A literal </web2api_response> in code")

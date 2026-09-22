@@ -1,3 +1,11 @@
+# Distribution 0.4.11
+
+- Corrige le parcours Computer Use de Codex après un premier résultat réussi : la passerelle associe chaque résultat à son appel `exec` et conserve la preuve que `@oai/sky` est disponible, au lieu de laisser le modèle conclure ensuite qu’il ne possède pas l’outil.
+- Transmet les captures Windows comme de vrais blocs image (`nodeRepl.emitImage` puis `image(block)`) et interdit la sérialisation du `WindowState` complet, qui transformait auparavant le JPEG en texte base64 inutilisable par ChatGPT.
+- Valide les appels contre la surface officielle de `@oai/sky`, refuse les méthodes inventées, les identifiants de fenêtre passés avec une mauvaise signature, les fenêtres reconstruites manuellement, les redécouvertes en boucle et plusieurs actions d’interface regroupées sans observation intermédiaire.
+- Après chaque clic, saisie ou touche, exige un nouvel état avant l’action suivante. Les confirmations requises par Codex restent demandées au moment de l’action concernée, notamment avant l’envoi d’un message.
+- Ajoute une régression reproduisant la séquence WhatsApp signalée. Une capture réelle en lecture seule a affiché la fenêtre et la conversation ciblée ; aucun clic, texte ni message n’a été exécuté pendant la validation.
+
 # Distribution 0.4.10
 
 - Corrige les réponses Agent qui annoncent une poursuite du travail après un résultat d’outil mais terminent silencieusement le tour de Continue.
