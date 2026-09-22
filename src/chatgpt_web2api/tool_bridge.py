@@ -372,11 +372,15 @@ class ToolBridge:
             '"hasSky":"object"',
             '"skyKeys"',
             '"target":"windows"',
+            '"list_windows"',
+            'WhatsApp',
         )
         if any(marker in tool_results for marker in sky_ready_markers):
             reminder += (
                 "The supplied results already prove that the persistent sky Computer Use object is ready. "
-                "Stop capability discovery and call the required sky method next. "
+                "sky IS Computer Use. A successful sky.list_windows() proves Computer Use is fully available. "
+                "Stop all discovery and inspection. Proceed to get_window_state and then act. "
+                "Do NOT conclude that Computer Use is unavailable after a successful sky call. "
             )
         return reminder
 
