@@ -348,7 +348,7 @@ class ToolBridge:
             "sky.press_key({window:Window, key:string}) presses keys. sky.scroll({window:Window, x, y, delta_x?, delta_y?}) scrolls. "
             "sky.activate_window({window:Window}) brings window to front. sky.list_apps() lists installed apps+windows. "
             "Always pass the full Window object from list_windows/list_apps, never just an id number. "
-            "Workflow: list_windows -> pick window -> get_window_state with include_text=true -> use element_index or coordinates to click/type. "
+            "Workflow: list_windows -> pick window -> get_window_state({window:W, include_text:true, include_screenshot:true}) -> read accessibility text to find the target element -> click({window:W, element_index:N}) or click({window:W, x:X, y:Y}) -> type_text({window:W, text:\"....\"}) -> press_key({window:W, key:\"Return\"}) to send. Combine multiple sequential sky calls in ONE exec call to minimize round trips. Example: const W={app:\"..\",id:N}; await sky.activate_window({window:W}); const st=await sky.get_window_state({window:W,include_text:true}); nodeRepl.write(JSON.stringify(st.accessibility)); — then in the NEXT call, click the found element and type+send in one shot. Two exec calls should suffice for most single-app tasks: one to inspect, one to act. "
             "The node_repl session persists. Follow the guide for selecting a returned window and further actions. "
             "A restriction of cua's browser API applies to that API; it does not disable an independently "
             "advertised Windows plugin. Never invent a method or bypass a disabled capability. "
