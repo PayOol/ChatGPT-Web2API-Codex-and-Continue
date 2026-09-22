@@ -88,7 +88,9 @@ def test_exec_instructions_explain_real_catalog_and_pixel_delivery():
     assert "image(block)" in prompt
     assert "data URL printed inside text is not a visible image" in prompt
     assert "tools.mcp__node_repl__js" in prompt
-    assert "Never call tools.mcp__cua_repl__js" in prompt
+    assert "Only if that catalog returns mcp__node_repl__js" in prompt
+    assert "A restriction of cua's browser API applies to that API" in prompt
+    assert "Never invent a method or bypass a disabled capability" in prompt
 
 
 @pytest.mark.parametrize("choice", [
