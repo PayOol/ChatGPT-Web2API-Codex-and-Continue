@@ -19,7 +19,7 @@ from pathlib import Path
 
 from configure import available_port, read_json, write_changed, write_json
 
-VERSION = "0.4.7"
+VERSION = "0.4.8"
 PRODUCT = "Web2API-Continue"  # Retained for common maintenance/backward compatibility.
 TARGET = "codex"
 
@@ -165,6 +165,7 @@ def configure(root: Path, source: Path, browser: Path, *, desktop_app_id: str = 
         chrome_path=str(browser), user_data_dir=str(root / "browser-profile"),
         cdp_port=cdp, headless=False, host="127.0.0.1", port=api,
         default_model="auto", tab_mode="owned", parallel_tabs=False,
+        agent_request_interval_seconds=0,
         request_timeout=0, detector_reasoning_first_content_timeout_seconds=0,
         detector_reasoning_stream_idle_timeout_seconds=0,
         detector_default_first_content_timeout_seconds=0,

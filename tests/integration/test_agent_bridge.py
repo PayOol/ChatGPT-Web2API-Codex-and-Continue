@@ -116,6 +116,59 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ToolProtocolError):
             bridge.parse(wrap(bridge, [{"name": "exec", "arguments": {"code": source}}]))
 
+    def test_codex_incremental_prompt_reuses_catalog_and_is_compact(self):
+        tools = [{"type": "function", "function": {
+            "name": "exec", "description": "Run JavaScript " + "catalog " * 2000,
+            "parameters": {"type": "object", "required": ["input"],
+                           "properties": {"input": {"type": "string"}},
+                           "additionalProperties": False},
+        }}]
+        bridge = ToolBridge.from_request(body(tools=tools))
+        initial = bridge.prompt(MESSAGES)
+        delta = [{"role": "tool", "tool_call_id": "call_1", "content": "ok"}]
+        incremental = bridge.prompt(delta, prior_messages=MESSAGES)
+        self.assertIn("Available functions (JSON)", initial)
+        self.assertNotIn("Available functions (JSON)", incremental)
+        self.assertIn("earlier system instructions", incremental)
+        self.assertIn("Execution handoff:", incremental)
+        self.assertLess(len(incremental), len(initial) // 3)
+
+    def test_codex_computer_use_has_one_exact_nested_route(self):
+        tools = [{"type": "function", "function": {
+            "name": "exec", "description": "Run JavaScript",
+            "parameters": {"type": "object", "required": ["input"],
+                           "properties": {"input": {"type": "string"}},
+                           "additionalProperties": False},
+        }}]
+        bridge = ToolBridge.from_request(body(tools=tools))
+        prompt = bridge.prompt(MESSAGES)
+        self.assertIn("tools.mcp__node_repl__js", prompt)
+        self.assertIn("Never call tools.mcp__cua_repl__js", prompt)
+        self.assertIn('await import("@oai/sky")', prompt)
+        self.assertIn("Do not rediscover tools", prompt)
+
+    def test_codex_computer_use_observed_failures_break_discovery_loop(self):
+        tools = [{"type": "function", "function": {
+            "name": "exec", "description": "Run JavaScript",
+            "parameters": {"type": "object", "required": ["input"],
+                           "properties": {"input": {"type": "string"}},
+                           "additionalProperties": False},
+        }}]
+        bridge = ToolBridge.from_request(body(tools=tools))
+        prior = MESSAGES + [
+            {"role": "tool", "tool_call_id": "bad", "content":
+             "TypeError: tools.mcp__cua_repl__js is not a function"},
+            {"role": "tool", "tool_call_id": "ready", "content":
+             '{"skyType":"object","skyKeys":["list_windows"]}'},
+        ]
+        prompt = bridge.prompt(
+            [{"role": "tool", "tool_call_id": "latest", "content": "continue"}],
+            prior_messages=prior,
+        )
+        self.assertIn("already proves tools.mcp__cua_repl__js is unavailable", prompt)
+        self.assertIn("already prove that the persistent sky Computer Use object is ready", prompt)
+        self.assertIn("Stop capability discovery", prompt)
+
     def test_frame_delimiter_inside_json_string_does_not_truncate(self):
         text = wrap(self.bridge, content="A literal </web2api_response> in code")
         self.assertEqual(

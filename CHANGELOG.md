@@ -1,3 +1,10 @@
+# Distribution 0.4.8
+
+- Supprime l'attente artificielle de 30 secondes entre les tours d'outils Codex. La cadence normale est désormais immédiate (`agent_request_interval_seconds: 0`), tandis que les vraies limitations signalées par ChatGPT conservent leur délai de protection.
+- Réutilise la conversation ChatGPT déjà ouverte pour les continuations d'outils et n'envoie plus à chaque tour le catalogue statique complet. Les nouveaux résultats sont transmis dans une enveloppe incrémentale bornée à 64 000 caractères.
+- Donne à Codex le chemin Computer Use réellement disponible (`exec` vers `mcp__node_repl__js`, puis `@oai/sky`) et interrompt les boucles observées après un point d'entrée invalide ou une initialisation déjà réussie.
+- Expose la cadence active dans `/health`, remet à zéro les anciens délais de cadence persistés lors de la mise à jour et journalise la taille de chaque invite sans son contenu.
+
 # Distribution 0.4.7
 
 - Corrige le 422 dans Continue quand ChatGPT termine par une réponse en texte normal malgré une demande de correction du format. Le texte original, y compris Markdown, peut être restitué après une seule correction.

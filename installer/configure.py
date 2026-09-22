@@ -13,7 +13,7 @@ import time
 
 import normal_profile
 
-VERSION = "0.4.7"
+VERSION = "0.4.8"
 
 
 def write_changed(path: Path, data: bytes, backup: Path):
@@ -280,6 +280,7 @@ def configure(root: Path, source: Path, extension: Path, browser: Path, editor: 
         default_model="auto",
         tab_mode="owned",
         parallel_tabs=False,
+        agent_request_interval_seconds=0,
         request_timeout=0,
         detector_reasoning_first_content_timeout_seconds=0,
         detector_reasoning_stream_idle_timeout_seconds=0,

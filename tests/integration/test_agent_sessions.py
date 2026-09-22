@@ -1,4 +1,5 @@
 import copy
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -134,6 +135,23 @@ class SessionHTTPTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_zero_interval_has_no_artificial_wait(self):
+        clock = [100.0]
+        waits = []
+
+        async def sleep(seconds):
+            waits.append(seconds)
+            clock[0] += seconds
+
+        state = AgentState(interval=0)
+        with (
+            patch("chatgpt_web2api.agent_sessions.time.time", lambda: clock[0]),
+            patch("chatgpt_web2api.agent_sessions.asyncio.sleep", sleep),
+        ):
+            observed = [await state.reserve(), await state.reserve(), await state.reserve()]
+        self.assertEqual(waits, [0, 0, 0])
+        self.assertEqual(observed, [0, 0, 0])
+
     async def test_spacing_between_sends(self):
         clock = [100.0]
         waits = []
@@ -151,6 +169,16 @@ class StateTests(unittest.IsolatedAsyncioTestCase):
             await state.reserve()
             await state.reserve()
         self.assertEqual(waits, [0, 30, 30])
+
+    def test_persisted_old_pacing_is_capped_to_new_interval(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "state.json"
+            path.write_text(json.dumps({"next_send": 999, "cooldown_until": 0}))
+            with patch("chatgpt_web2api.agent_sessions.time.time", return_value=100):
+                fast = AgentState(path, interval=0)
+                bounded = AgentState(path, interval=2)
+            self.assertEqual(fast.next_send, 100)
+            self.assertEqual(bounded.next_send, 102)
 
     def test_session_and_pause_survive_restart_without_source_content(self):
         with tempfile.TemporaryDirectory() as folder:

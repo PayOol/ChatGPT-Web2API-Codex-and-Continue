@@ -1,4 +1,4 @@
-"""Conservative history matching and account-wide pacing for the local API."""
+"""Conservative history matching and adaptive account pacing for the local API."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ class UncertainSendError(RuntimeError):
 class AgentState:
     """Persist only hashes/identifiers/times, never project contents or credentials."""
 
-    def __init__(self, path=None, interval=30):
+    def __init__(self, path=None, interval=0.0):
         self.path = Path(path) if path else None
         self.interval = interval
         self.sessions = []
@@ -62,7 +62,14 @@ class AgentState:
             self.sessions = data.get("sessions", [])
             self.uncertain = data.get("uncertain", {})
             self.pending_frames = data.get("pending_frames", {})
-            self.next_send = data.get("next_send", 0)
+            # Pacing is a local throughput preference, not a rate-limit
+            # penalty.  A previous version may have persisted a 30-second
+            # deadline; cap it to the current interval so a speed upgrade takes
+            # effect immediately.  Real rate limits live in cooldown_until.
+            self.next_send = min(
+                float(data.get("next_send", 0)),
+                time.time() + max(0.0, float(self.interval)),
+            )
             self.cooldown_until = data.get("cooldown_until", 0)
 
     def save(self):
@@ -122,10 +129,12 @@ class AgentState:
 
     async def reserve(self):
         self.check()
-        await asyncio.sleep(max(0, self.next_send - time.time()))
+        wait_seconds = max(0, self.next_send - time.time())
+        await asyncio.sleep(wait_seconds)
         self.check()
         self.next_send = time.time() + self.interval
         self.save()
+        return wait_seconds
 
     def penalize(self, seconds):
         self.cooldown_until = max(self.cooldown_until, time.time() + max(180, seconds))

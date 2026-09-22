@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import shutil
@@ -84,6 +85,12 @@ class ChatGPTConfig:
     # fail-closed owned-tab requirement (no shared-tab fallback). Default False
     # reproduces the exact legacy single-tab-serialized behavior.
     parallel_tabs: bool = False
+    # Browser generations already serialize naturally and the rate-limit
+    # detector applies a real cooldown when ChatGPT asks us to slow down.  A
+    # fixed 30-second gap made every native Codex tool round wait even after the
+    # preceding generation had completed.  Zero keeps the safe serialization
+    # while removing that artificial delay.
+    agent_request_interval_seconds: float = 0.0
     # B1: MCP session-affine driver pool. When True, the MCP server does NOT
     # connect to Chrome at startup. Instead, the first browser-affecting request
     # from each MCP session materializes one owned CDPDriver/tab. Different
@@ -190,6 +197,12 @@ class Config:
                 f"{cfg.chatgpt.tab_mode!r}); parallel mode needs per-target "
                 "owned tabs for correct locking"
             )
+        if (
+            not math.isfinite(cfg.chatgpt.agent_request_interval_seconds)
+            or cfg.chatgpt.agent_request_interval_seconds < 0
+            or cfg.chatgpt.agent_request_interval_seconds > 300
+        ):
+            raise ValueError("agent_request_interval_seconds must be between 0 and 300")
         # B1: pool mode requires the full parallel-tabs safety bundle.
         if cfg.chatgpt.mcp_session_pool_enabled:
             if not cfg.chatgpt.parallel_tabs:
@@ -250,6 +263,9 @@ class Config:
         c = data.get("parallel_tabs")
         if c is not None:
             self.chatgpt.parallel_tabs = _as_bool(c)
+        c = data.get("agent_request_interval_seconds")
+        if c is not None:
+            self.chatgpt.agent_request_interval_seconds = float(c)
         c = data.get("mcp_session_pool_enabled")
         if c is not None:
             self.chatgpt.mcp_session_pool_enabled = _as_bool(c)
@@ -327,6 +343,8 @@ class Config:
                 self.chatgpt.tab_mode = v
         if v := _env("W2A_PARALLEL_TABS"):
             self.chatgpt.parallel_tabs = v.lower() in ("true", "1", "yes")
+        if v := _env("W2A_AGENT_REQUEST_INTERVAL_SECONDS"):
+            self.chatgpt.agent_request_interval_seconds = float(v)
         if v := _env("W2A_MCP_SESSION_POOL_ENABLED"):
             self.chatgpt.mcp_session_pool_enabled = v.lower() in ("true", "1", "yes")
         if v := _env("W2A_MCP_SESSION_POOL_SIZE"):
@@ -376,6 +394,7 @@ class Config:
             "default_project_id": self.chatgpt.default_project_id,
             "tab_mode": self.chatgpt.tab_mode,
             "parallel_tabs": self.chatgpt.parallel_tabs,
+            "agent_request_interval_seconds": self.chatgpt.agent_request_interval_seconds,
             "mcp_session_pool_enabled": self.chatgpt.mcp_session_pool_enabled,
             "mcp_session_pool_size": self.chatgpt.mcp_session_pool_size,
             "mcp_session_pool_ttl_seconds": self.chatgpt.mcp_session_pool_ttl_seconds,

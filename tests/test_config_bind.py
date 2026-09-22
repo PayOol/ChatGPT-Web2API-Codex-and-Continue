@@ -33,6 +33,24 @@ def test_config_no_default_uses_builtin_defaults(tmp_path, monkeypatch):
     cfg = Config.load(None)
     assert cfg.server.port == 8080  # built-in default
     assert cfg.server.host == "127.0.0.1"
+    assert cfg.chatgpt.agent_request_interval_seconds == 0.0
+
+
+def test_agent_request_interval_file_env_and_validation(tmp_path, monkeypatch):
+    """The speed control is configurable, env-overridable and bounded."""
+    cfg_file = tmp_path / "speed.json"
+    cfg_file.write_text(json.dumps({"agent_request_interval_seconds": 2.5}))
+    assert Config.load(str(cfg_file)).chatgpt.agent_request_interval_seconds == 2.5
+
+    monkeypatch.setenv("W2A_AGENT_REQUEST_INTERVAL_SECONDS", "0.25")
+    cfg = Config.load(str(cfg_file))
+    assert cfg.chatgpt.agent_request_interval_seconds == 0.25
+    assert cfg.to_dict()["agent_request_interval_seconds"] == 0.25
+
+    monkeypatch.delenv("W2A_AGENT_REQUEST_INTERVAL_SECONDS")
+    cfg_file.write_text(json.dumps({"agent_request_interval_seconds": -1}))
+    with pytest.raises(ValueError, match="between 0 and 300"):
+        Config.load(str(cfg_file))
 
 
 def test_config_explicit_path_overrides_default(tmp_path, monkeypatch):
@@ -166,4 +184,3 @@ def test_ensure_config_to_dict_roundtrip():
     assert d["ensure_degraded_poll_interval_s"] == 2.0
     assert d["ensure_degraded_poll_budget_s"] == 11.0
     assert d["ensure_breaker_cooldown_grace_s"] == 5.0
-

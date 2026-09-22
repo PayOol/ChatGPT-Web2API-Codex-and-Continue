@@ -101,7 +101,7 @@ class APIServer:
             / "agent-state.json"
             if isinstance(driver, CDPDriver)
             else None,
-            interval=30,
+            interval=config.chatgpt.agent_request_interval_seconds,
         )
 
         # Four 12 MiB images can exceed 64 MiB after base64 + JSON encoding.
@@ -226,6 +226,7 @@ class APIServer:
                 "requests_served": self._request_count,
                 "active_requests": self._active_requests,
                 "request_timeout_seconds": self._config.server.request_timeout,
+                "agent_request_interval_seconds": self._agent_state.interval,
                 "tool_calling": "text-bridge-v1",
                 "image_inputs": True,
                 "started_at": self._started_at,
@@ -520,8 +521,12 @@ class APIServer:
                 if isinstance(self._driver, CDPDriver):
                     await self._driver._dom.check_rate_limit()
                 # Applies to Agent, title generation and apply calls alike.
-                report("Préparation de l'envoi ; respect du délai entre les demandes.")
-                await self._agent_state.reserve()
+                pacing_wait = max(0.0, self._agent_state.next_send - time.time())
+                if pacing_wait >= 0.05:
+                    report(f"Préparation de l'envoi ; délai restant {pacing_wait:.1f} s.")
+                waited = await self._agent_state.reserve()
+                if waited >= 0.05:
+                    logger.info("Agent pacing waited %.3fs before browser send", waited)
 
                 # Select model if specified (non-fatal on failure)
                 if model_slug and model_slug != "auto":
