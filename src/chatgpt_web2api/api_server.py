@@ -824,6 +824,17 @@ class APIServer:
                         else:
                             logger.info("Recovered final text from the exact completed repair; no tool call accepted")
                             return message, snapshot["conversation"]
+                    if bridge.choice in ("auto", "none") and not snapshot.get("literal"):
+                        from .agent_final import final_text_message
+
+                        read_final = getattr(self._driver, "read_agent_final_text", None)
+                        source = await read_final(snapshot) if read_final else None
+                        if source is not None:
+                            message = final_text_message(source, bridge.choice)
+                            logger.info(
+                                "Recovered verified final prose after format repair; no tool call accepted"
+                            )
+                            return message, snapshot["conversation"]
                     raise ToolProtocolError(
                         "ChatGPT's answer is still invalid after one format repair; "
                         "no tool from this rejected response was executed"

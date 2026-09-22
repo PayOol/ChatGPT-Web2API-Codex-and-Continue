@@ -243,5 +243,79 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         r = await self.nonce_typo_after_repair({"generating": True})
         self.assertEqual(r.status, 422)
 
+    async def plain_after_repair(self, *, choice="auto", stream=False, change=None, source=None):
+        self.driver.answers = [ToolProtocolError("No frame"), ToolProtocolError("Still no frame")]
+        self.driver._current_conv_id = "test-chat"
+
+        async def snapshot():
+            return {
+                "user": self.driver.prompts[-1], "conversation": "test-chat", "paired": True,
+                "generating": False, "completed": True, "literal": False, "unsafe_markup": True,
+                "assistant": "Refus du format", **(change or {}),
+            }
+
+        self.driver.read_agent_exchange = AsyncMock(side_effect=snapshot)
+        self.driver.read_agent_final_text = AsyncMock(return_value=source)
+        return await self.client.post(
+            "/v1/chat/completions", json=body(tool_choice=choice, stream=stream)
+        )
+
+    async def test_verified_plain_refusal_is_delivered_as_text_without_third_send(self):
+        source = "Je ne peux pas fournir ce wrapper `web2api_response`.\n\nAucune autre action."
+        r = await self.plain_after_repair(source=source)
+        self.assertEqual(r.status, 200, await r.text())
+        reply = (await r.json())["choices"][0]
+        self.assertEqual(reply["finish_reason"], "stop")
+        self.assertEqual(reply["message"], {"role": "assistant", "content": source})
+        self.assertEqual(len(self.driver.prompts), 2)
+        self.assertFalse(self.api._agent_state.uncertain)
+        r = await self.client.post("/v1/chat/completions", json=body(tool_choice="auto", stream=False))
+        self.assertEqual(r.status, 200)
+        self.assertEqual((await r.json())["choices"][0], reply)
+        self.assertEqual(len(self.driver.prompts), 2)
+
+    async def test_verified_plain_answer_streams_content_without_tool_events(self):
+        r = await self.plain_after_repair(source="Texte **final**", stream=True)
+        self.assertEqual(r.status, 200, await r.text())
+        sse = await r.text()
+        self.assertIn("Texte **final**", sse)
+        self.assertIn('"finish_reason": "stop"', sse)
+        self.assertNotIn('"tool_calls"', sse)
+        self.assertIn("[DONE]", sse)
+
+    async def test_plain_answer_cannot_bypass_required_tools(self):
+        r = await self.plain_after_repair(choice="required", source="Final")
+        self.assertEqual(r.status, 422)
+        self.driver.read_agent_final_text.assert_not_awaited()
+
+    async def test_plain_answer_without_backend_proof_stays_blocked(self):
+        r = await self.plain_after_repair(source=None)
+        self.assertEqual(r.status, 422)
+        self.assertEqual(len(self.driver.prompts), 2)
+
+    async def test_rejected_tool_json_is_not_hidden_as_final_text(self):
+        r = await self.plain_after_repair(source=json.dumps({"content": None, "tool_calls": [CALL]}))
+        self.assertEqual(r.status, 422)
+        self.assertEqual(len(self.driver.prompts), 2)
+
+    async def test_plain_answer_cannot_bypass_full_prompt_matching(self):
+        r = await self.plain_after_repair(source="Wrong answer", change={"user": "Different task"})
+        self.assertEqual(r.status, 422)
+        self.driver.read_agent_final_text.assert_not_awaited()
+
+    async def test_existing_failed_repair_recovers_after_restart_without_any_resend(self):
+        r = await self.plain_after_repair(source=None)
+        self.assertEqual(r.status, 422)
+        with tempfile.TemporaryDirectory() as folder:
+            self.api._agent_state.path = Path(folder) / "state.json"
+            self.api._agent_state.save()
+            self.api._agent_state = AgentState(self.api._agent_state.path, interval=0)
+            self.driver.read_agent_final_text.return_value = "Texte original **conservé**"
+            r = await self.client.post("/v1/chat/completions", json=body(tool_choice="auto", stream=False))
+            self.assertEqual(r.status, 200, await r.text())
+            self.assertEqual((await r.json())["choices"][0]["message"]["content"], "Texte original **conservé**")
+            self.assertEqual(len(self.driver.prompts), 2)
+            self.assertFalse(self.api._agent_state.uncertain)
+
 
 del HTTPTests

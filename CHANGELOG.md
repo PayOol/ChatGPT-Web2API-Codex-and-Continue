@@ -1,3 +1,10 @@
+# Distribution 0.4.7
+
+- Corrige le 422 dans Continue quand ChatGPT termine par une réponse en texte normal malgré une demande de correction du format. Le texte original, y compris Markdown, peut être restitué après une seule correction.
+- La récupération exige la demande complète correspondante, les identifiants exacts de l'utilisateur et de l'assistant, la branche courante du backend et une réponse terminée. Un changement de conversation pendant la lecture annule la récupération.
+- Cette récupération produit uniquement du texte : aucun appel d'outil n'est créé, aucun lot d'appels rejeté n'est accepté et les choix d'outil obligatoire restent stricts. Un refus de ChatGPT est transmis tel quel, sans être masqué par une erreur technique.
+- Les réponses déjà présentes après redémarrage sont récupérées sans renvoyer la demande ni répéter les actions précédentes.
+
 # Distribution 0.4.6
 
 - Corrige la détection de Continue 2.0.0 dans le profil VS Code normal sous Windows PowerShell 5.1 ; le tableau de `extensions.json` n'est plus transmis à `Join-Path` comme `System.Object[]`.

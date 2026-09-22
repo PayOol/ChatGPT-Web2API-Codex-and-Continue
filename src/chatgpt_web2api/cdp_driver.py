@@ -1726,6 +1726,7 @@ class CDPDriver:
             "var c=location.pathname.match(/\\/c\\/([a-zA-Z0-9-]+)(?:\\/|$)/);"
             "return JSON.stringify({conversation:c?c[1]:'',"
             "user_message_id:u?u.getAttribute('data-message-id'):null,"
+            "assistant_message_id:a?a.getAttribute('data-message-id'):null,"
             "user_rendered:!!(u&&u.querySelector('code.user-message-inline-code')),"
             "user:u?((u.querySelector('.rich-text-user-turn,.whitespace-pre-wrap')||u).textContent||''):'',"
             "assistant:protocol.text,literal:protocol.literal,unsafe_markup:protocol.unsafe_markup,"
@@ -1760,6 +1761,34 @@ class CDPDriver:
                 except Exception as exc:
                     logger.debug("Original user text unavailable: %s", type(exc).__name__)
         return snapshot
+
+    async def read_agent_final_text(self, snapshot: dict) -> str | None:
+        """Read verified final prose without sending or changing the browser."""
+        from .agent_final import verified_final_source
+
+        if (
+            not snapshot.get("conversation") or not snapshot.get("user_message_id")
+            or not snapshot.get("assistant_message_id") or not snapshot.get("completed")
+            or not snapshot.get("paired") or snapshot.get("generating")
+        ):
+            return None
+        projection = await self._backend_client._fetch_recent_conversation_projection(
+            snapshot["conversation"]
+        )
+        text = verified_final_source(projection, snapshot)
+        if text is None:
+            return None
+        # Fetching is asynchronous: refuse a result if the user switched chats,
+        # submitted another message, or resumed generation in the meantime.
+        current = await self.read_agent_exchange()
+        keys = ("conversation", "user_message_id", "assistant_message_id", "user", "assistant")
+        if (
+            any(current.get(key) != snapshot.get(key) for key in keys)
+            or not current.get("completed") or not current.get("paired")
+            or current.get("generating")
+        ):
+            return None
+        return text
 
     async def send_and_stream(
         self,
