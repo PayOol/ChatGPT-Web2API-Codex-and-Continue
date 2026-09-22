@@ -92,7 +92,7 @@ src/chatgpt_web2api/
 3. Handler calls cdp_driver method:
    a. Navigate to chatgpt.com conversation
    b. Type message via Input.insertText
-   c. Click send via JS MouseEvent sequence
+   c. Activate the strictly selected visible send control in the composer DOM
    d. Poll DOM for response (or fetch from conversation API)
 4. Return formatted response
 ```

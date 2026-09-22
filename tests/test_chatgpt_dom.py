@@ -172,7 +172,7 @@ async def test_click_send_records_success_through_driver_breaker():
     dom, driver = _make_dom()
     reg = BreakerRegistry()
     driver._breakers = reg
-    driver._js_strict = AsyncMock(return_value='{"status":"ready","x":10,"y":20}')
+    driver._js_strict = AsyncMock(return_value='{"status":"clicked"}')
 
     await dom.click_send()
     # Not open after a success record (record_success clears failures).
@@ -283,17 +283,17 @@ async def test_click_send_waits_then_sends(monkeypatch):
     monkeypatch.setattr(dom_mod, "SEND_BUTTON_POLL_MAX_WAIT_S", 2.0)
 
     dom, driver = _make_dom()
-    # First 3 readiness checks → "no" (button not ready), then "yes", then "sent".
+    # First 3 checks miss the control; the fourth clicks the strictly selected
+    # DOM button and returns the acknowledged transport status.
     driver._js_strict = AsyncMock(
-        side_effect=['{"status":"missing"}'] * 3 + ['{"status":"ready","x":10,"y":20}']
+        side_effect=['{"status":"missing"}'] * 3 + ['{"status":"clicked"}']
     )
 
     await dom.click_send()  # must not raise
 
-    # The readiness poll should have run 4 times (3×"no" + 1×"yes"), then the
-    # click once ("sent") = 5 total _js calls.
+    # The fourth strict DOM evaluation performs the click itself.
     assert driver._js_strict.await_count == 4
-    assert driver._cdp.await_count == 3  # trusted move, press, release
+    assert driver._cdp.await_count == 0
 
 
 @pytest.mark.asyncio

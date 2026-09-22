@@ -17,20 +17,17 @@ class ComposerTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await click_control(d, "send"), status)
             d._cdp.assert_not_awaited()
 
-    async def test_send_uses_single_trusted_click(self):
+    async def test_send_uses_single_strict_dom_click(self):
         d = SimpleNamespace(
-            _js_strict=AsyncMock(return_value=json.dumps({"status": "ready", "x": 14, "y": 25})),
+            _js_strict=AsyncMock(return_value=json.dumps({"status": "clicked"})),
             _cdp=AsyncMock(),
         )
         self.assertEqual(await click_control(d, "send"), "clicked")
-        self.assertEqual(
-            [c.args[1]["type"] for c in d._cdp.call_args_list],
-            ["mouseMoved", "mousePressed", "mouseReleased"],
-        )
-        self.assertTrue(all(c.args[0] == "Input.dispatchMouseEvent" for c in d._cdp.call_args_list))
+        d._cdp.assert_not_awaited()
         script = d._js_strict.call_args.args[0]
         self.assertIn("kind==='send'&&stop", script)
         self.assertIn("b.dataset.testid!=='stop-button'", script)
+        self.assertIn("b.click()", script)
         self.assertNotIn("dispatchEvent", script)
 
     def test_legacy_fallback_excludes_submit_stop_button(self):

@@ -1,4 +1,4 @@
-"""Trusted composer clicks, with an explicit send/stop distinction."""
+"""Strict composer controls, with an explicit send/stop distinction."""
 
 import asyncio
 import json
@@ -26,23 +26,16 @@ async def click_control(driver, kind):
       const r=b.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
       const hit=document.elementFromPoint(x,y);
       if(!hit||!b.contains(hit))return JSON.stringify({status:'occluded'});
-      return JSON.stringify({status:'ready',x,y});
+      // ChatGPT's current composer ignores CDP Input.dispatchMouseEvent while
+      // its window is in the background, even though the hit test succeeds.
+      // HTMLElement.click() reaches the same strictly selected, visible and
+      // enabled control and is verified by the post-send acknowledgment gate.
+      b.click();
+      return JSON.stringify({status:'clicked'});
     })()""".replace("KIND", json.dumps(kind))
     )
     state = json.loads(raw)
-    if state.get("status") != "ready":
-        return state.get("status", "missing")
-    coords = {"x": state["x"], "y": state["y"]}
-    await driver._cdp("Input.dispatchMouseEvent", {"type": "mouseMoved", **coords})
-    await driver._cdp(
-        "Input.dispatchMouseEvent",
-        {"type": "mousePressed", **coords, "button": "left", "clickCount": 1},
-    )
-    await driver._cdp(
-        "Input.dispatchMouseEvent",
-        {"type": "mouseReleased", **coords, "button": "left", "clickCount": 1},
-    )
-    return "clicked"
+    return state.get("status", "missing")
 
 
 async def wait_idle(driver, timeout=5):

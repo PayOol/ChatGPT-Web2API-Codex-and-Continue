@@ -270,7 +270,7 @@ Captured from real conversation: "Model Inquiry" (gpt-5-5-thinking)
 5. **Message mapping is a tree**: each node has parent + children, supporting branching conversations
 6. **Thinking model content types**: `thoughts`, `reasoning_recap`, `model_editable_context`, `text`
 7. **Model slug with thinking**: `gpt-5-5-thinking` (derived from base model `gpt-5-5` + thinking mode)
-8. **Message sending works**: Via JS click with full MouseEvent sequence on send button
+8. **Message sending works**: Via a strictly scoped DOM click on the visible, enabled send button, followed by acknowledgment checks
 9. **BrowserFetch pattern**: Dedicated `about:blank` scratch frame inherits browser auth (persona=`chatgpt-paid`)
 10. **Conversation/prepare**: Returns a `conduit_token` (JWT) for the session
 

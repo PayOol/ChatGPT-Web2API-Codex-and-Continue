@@ -61,6 +61,7 @@ yield type are imported **lazily inside ``stream_until_complete``**, after
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -349,6 +350,55 @@ class CompletionDetector:
 
         d = self._driver
 
+        # ChatGPT's current code-block viewer can virtualize a completed JSON
+        # response down to the few characters visible in its editor viewport.
+        # The backend still holds the complete end_turn=true text. Resolve it
+        # only through the exact per-send TurnAnchor, then run the very same
+        # nonce/schema validator used for DOM text. This is a completion read,
+        # never a resend or a weaker tool-acceptance path.
+        structured_backend_last_check = 0.0
+        structured_backend_conv_id = ""
+
+        async def structured_backend_completed() -> bool:
+            nonlocal structured_backend_last_check, structured_backend_conv_id
+            if response_validator is None:
+                return False
+            fetch_text = getattr(d, "_fetch_text_for_turn", None)
+            get_conversation_id = getattr(
+                d, "_get_live_conversation_id_best_effort", None
+            )
+            # Several embedding/tests use a permissive MagicMock driver.  A
+            # fabricated mock attribute must not opt that driver into backend
+            # reconciliation: both collaborators are real async seams.
+            if not inspect.iscoroutinefunction(fetch_text) or not inspect.iscoroutinefunction(
+                get_conversation_id
+            ):
+                return False
+            now = time.monotonic()
+            if now - structured_backend_last_check < 2.0:
+                return False
+            if not structured_backend_conv_id:
+                structured_backend_conv_id = await get_conversation_id()
+            if not structured_backend_conv_id:
+                return False
+            structured_backend_last_check = now
+            result = await fetch_text(structured_backend_conv_id, turn_anchor)
+            if result.status != "matched" or not result.text:
+                if result.status == "fetch_failed":
+                    logger.debug(
+                        "Structured backend completion fetch failed: %s",
+                        result.diagnostic,
+                    )
+                return False
+            frame = response_validator(result.text)
+            self.last_dom_text = result.text
+            self.validated_dom_text = frame
+            logger.info(
+                "Structured Agent response validated from anchored backend end_turn: %s",
+                structured_backend_conv_id,
+            )
+            return True
+
         # P1: resolve the model class for structured error reporting.
         model_class = classify_model(model) if model else "default"
         # P1: budgets default to legacy behavior when not provided (back-compat).
@@ -471,6 +521,8 @@ class CompletionDetector:
                         )
             elif current_count > initial_count:
                 break
+            if await structured_backend_completed():
+                return
             if appear_budget > 0 and time.monotonic() - last_progress > appear_budget:
                 raise GenerationStuckError("phase_1_appear", time.monotonic() - last_progress)
             await asyncio.sleep(0.5)
@@ -751,6 +803,7 @@ class CompletionDetector:
             last_child_count = child_count
 
             # ── Completion detection ─────────────────────────────────────
+            structured_dom_valid = False
             if response_validator is not None and md_text and not is_thinking:
                 is_generating = data.get("is_generating", False)
                 try:
@@ -771,6 +824,7 @@ class CompletionDetector:
                     ):
                         raise
                 else:
+                    structured_dom_valid = True
                     if time.monotonic() - last_change_time >= 1.0:
                         if is_generating:
                             # The complete, validated protocol frame explicitly
@@ -796,6 +850,14 @@ class CompletionDetector:
                             self.validated_dom_text = framed
                             logger.info("Structured Agent response validated from completed DOM")
                             break
+            if (
+                response_validator is not None
+                and not structured_dom_valid
+                and not data.get("unsafe_markup")
+                and data.get("literal", True)
+                and await structured_backend_completed()
+            ):
+                break
             # Two signals, ordered by stability. Backend end_turn is PRIMARY
             # (issue #12): it survived three DOM action-button drifts where the
             # DOM selector failed. The DOM has_action is a FALLBACK for the

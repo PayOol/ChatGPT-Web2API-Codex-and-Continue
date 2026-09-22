@@ -12,7 +12,7 @@ ChatGPT code review (conv 6a52f0f3) found two defects:
 
 Fix 1: after click_send + UUID wait, verify at least one acknowledgment:
   - UUID captured, OR
-  - user-message DOM count increased AND composer cleared
+  - composer cleared AND user-message DOM count increased or Stop appeared
   If none → raise SendNotAcknowledgedError before entering completion detection.
 
 Fix 2: include last_result.diagnostic in TurnReconciliationError.
@@ -44,7 +44,8 @@ def _make_driver():
 
 
 @pytest.mark.asyncio
-async def test_send_not_acknowledged_raises_when_no_signals(monkeypatch):
+@pytest.mark.parametrize("structured", [False, True])
+async def test_send_not_acknowledged_raises_when_no_signals(monkeypatch, structured):
     """When click_send fires but no acknowledgment appears (no UUID, no DOM
     count increase, composer not cleared), the bridge must raise a typed error
     instead of silently entering completion detection."""
@@ -78,7 +79,11 @@ async def test_send_not_acknowledged_raises_when_no_signals(monkeypatch):
 
     # The send_and_stream should raise before entering completion detection
     with pytest.raises(Exception) as exc_info:
-        async for _ in driver.send_and_stream("test message", timeout=10):
+        async for _ in driver.send_and_stream(
+            "test message",
+            timeout=10,
+            response_validator=(lambda value: value) if structured else None,
+        ):
             pass
 
     # Should be a SendNotAcknowledged-style error, not a timeout
@@ -156,6 +161,28 @@ async def test_send_acknowledged_when_user_count_increases(monkeypatch):
     async for chunk in driver.send_and_stream("test message", timeout=10):
         chunks.append(chunk)
     assert len(chunks) > 0
+
+
+@pytest.mark.asyncio
+async def test_send_acknowledged_when_generation_control_appears_with_virtualized_user_nodes():
+    """A cleared composer plus Stop is positive proof even if old user nodes are virtualized."""
+    driver = _make_driver()
+    driver._pre_send_user_count = 7
+
+    async def fake_js_strict(expr, timeout=15):
+        if "userCount" in expr and "composerEmpty" in expr:
+            return json.dumps(
+                {
+                    "userCount": 7,
+                    "composerPresent": True,
+                    "composerEmpty": True,
+                    "stopPresent": True,
+                }
+            )
+        return "0"
+
+    driver._js_strict = fake_js_strict
+    assert await driver._verify_send_acknowledged() is True
 
 
 # ── 2. Diagnostic preservation in TurnReconciliationError ────────────────

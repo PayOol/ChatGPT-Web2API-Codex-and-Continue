@@ -225,7 +225,7 @@ async def test_click_send_fails_when_no_send_button(monkeypatch):
 @pytest.mark.asyncio
 async def test_click_send_accepts_send_labels_and_legacy_testid(monkeypatch):
     d = _make_driver()
-    d._js_strict = AsyncMock(return_value='{"status":"ready","x":10,"y":20}')
+    d._js_strict = AsyncMock(return_value='{"status":"clicked"}')
     d._cdp = AsyncMock()
     await d.click_send()
     expression = d._js_strict.call_args.args[0]
@@ -233,17 +233,17 @@ async def test_click_send_accepts_send_labels_and_legacy_testid(monkeypatch):
     assert "send|envoyer" in expression
     assert "stop-button" in expression
     assert "b.type==='submit'" in expression
-    assert d._cdp.await_count == 3
+    assert "b.click()" in expression
+    d._cdp.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_click_send_sent_on_success():
     d = _make_driver()
-    d._js_strict = AsyncMock(return_value='{"status":"ready","x":10,"y":20}')
+    d._js_strict = AsyncMock(return_value='{"status":"clicked"}')
     d._cdp = AsyncMock()
     await d.click_send()
-    assert d._cdp.call_args.args[0] == "Input.dispatchMouseEvent"
-    assert d._cdp.call_args.args[1]["type"] == "mouseReleased"
+    d._cdp.assert_not_awaited()
 
 
 # ── 4. Readiness checks accept the new composer ────────────────

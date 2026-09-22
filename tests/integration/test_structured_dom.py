@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 from chatgpt_web2api.completion_detector import CompletionDetector
 from chatgpt_web2api.tool_bridge import ToolBridge, ToolProtocolError
-from chatgpt_web2api.turn_anchor import TurnAnchor
+from chatgpt_web2api.turn_anchor import TurnAnchor, TurnTextResult
 
 
 class StructuredDOMTests(unittest.IsolatedAsyncioTestCase):
@@ -167,6 +167,50 @@ class StructuredDOMTests(unittest.IsolatedAsyncioTestCase):
             + "</web2api_response>"
         )
         self.assertEqual(await self.run_dom(value, b, virtualized=True), value)
+
+    async def test_virtualized_code_viewer_uses_exact_completed_backend_frame(self):
+        """A CodeMirror viewport may expose only a prefix after backend end_turn."""
+        b = self.bridge()
+        value = (
+            b.opening
+            + json.dumps({"content": "Backend complete", "tool_calls": []})
+            + "</web2api_response>"
+        )
+
+        async def js(expr):
+            if "text: t.slice" in expr:
+                return '{"text":""}'
+            if "if(!last)return" in expr:
+                return b.opening[:28]
+            if expr.endswith(".length"):
+                return "3"
+            raise AssertionError(f"Unexpected DOM read: {expr[:100]}")
+
+        driver = SimpleNamespace(
+            _current_conv_id=None,
+            _js_strict=js,
+            _get_live_conversation_id_best_effort=AsyncMock(return_value="conv-exact"),
+            _fetch_text_for_turn=AsyncMock(
+                return_value=TurnTextResult(status="matched", text=value)
+            ),
+            _fetch_end_turn_for_turn=AsyncMock(),
+        )
+        detector = CompletionDetector(driver)
+        async for _ in detector.stream_until_complete(
+            initial_count=3,
+            timeout=4,
+            turn_anchor=TurnAnchor(
+                sent_text="test",
+                mode="captured_id",
+                captured_user_message_id="user-exact",
+            ),
+            response_validator=b.validated_frame,
+            response_marker=b.opening,
+        ):
+            pass
+        self.assertEqual(detector.validated_dom_text, value)
+        driver._fetch_text_for_turn.assert_awaited_once()
+        driver._fetch_end_turn_for_turn.assert_not_awaited()
 
     async def test_virtualized_old_nonce_cannot_be_accepted(self):
         from chatgpt_web2api.cdp_driver import GenerationStuckError

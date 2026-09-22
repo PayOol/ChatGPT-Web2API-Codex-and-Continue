@@ -1469,7 +1469,7 @@ class CDPDriver:
         return await self._dom._verify_composer_text(selector, expected)
 
     async def click_send(self) -> None:
-        """Click the send button via JS MouseEvent sequence.
+        """Click the strictly selected send button in the page DOM.
 
         Delegated to ChatGPTDom (Phase 5 PR3 extraction). Preserved exactly:
         aria-label-then-legacy selector, COMPOSER_SEND_READINESS breaker
@@ -1568,16 +1568,16 @@ class CDPDriver:
     async def _verify_send_acknowledged(self) -> bool | None:
         """P0 send acknowledgment (ChatGPT review, conv 6a52f0f3).
 
-        After click_send dispatches synthetic mouse events, verify the message
-        was actually accepted by React — not just that the JS event loop ran.
+        After click_send activates the strictly selected DOM control, verify
+        that the message was actually accepted by React — not just that the
+        click function returned.
 
-        Composite condition: user-message count increased AND composer cleared.
-        Uses the pre-send user count baseline (self._pre_send_user_count) to
-        detect the delta, not just "userCount > 0" (which is always true on
-        existing conversations).
+        Composite condition: composer cleared AND either the user-message count
+        increased or the generation Stop control appeared. The latter covers
+        long conversations whose old user nodes are virtualized.
 
         Tri-state return:
-          - True: acknowledged (count increased AND composer cleared)
+          - True: acknowledged (composer cleared and count increased or Stop appeared)
           - False: conclusively NOT acknowledged (valid probes showed no delta)
           - None: probe inconclusive (CDP errors, no valid probe obtained,
             missing composer, or no pre-send baseline) — non-blocking
@@ -1605,7 +1605,8 @@ class CDPDriver:
                     f"       || document.querySelector('{COMPOSER_FALLBACK_SELECTOR}');"
                     "  var composerPresent = !!composer;"
                     "  var composerEmpty = composer ? !(composer.innerText || composer.value || '').trim() : false;"
-                    "  return JSON.stringify({userCount: userMsgs, composerPresent: composerPresent, composerEmpty: composerEmpty});"
+                    "  var stopPresent = !!document.querySelector('[data-testid=\"stop-button\"]');"
+                    "  return JSON.stringify({userCount: userMsgs, composerPresent: composerPresent, composerEmpty: composerEmpty, stopPresent: stopPresent});"
                     "})()"
                 )
                 if not result or not result.strip().startswith("{"):
@@ -1622,7 +1623,9 @@ class CDPDriver:
                 # and we can actually evaluate the acknowledgment condition.
                 valid_probe_seen = True
                 current_count = state.get("userCount", 0)
-                if current_count > pre_send_count and state.get("composerEmpty"):
+                if state.get("composerEmpty") and (
+                    current_count > pre_send_count or state.get("stopPresent")
+                ):
                     return True
             except Exception:
                 pass
@@ -1887,12 +1890,12 @@ class CDPDriver:
             await self._dom.check_rate_limit()
 
             # P0 send acknowledgment (ChatGPT review, conv 6a52f0f3):
-            # click_send dispatches synthetic mouse events — that proves the
-            # JS ran, not that React accepted the submission. Under load, the
-            # click can fire without producing a user message. Before entering
+            # click_send returning proves that the selected control was
+            # activated, not that React accepted the submission. Under load,
+            # the click can fire without producing a user message. Before entering
             # completion detection, verify at least one acknowledgment signal:
             #   1. UUID was captured, OR
-            #   2. user-message count increased AND composer cleared
+            #   2. composer cleared AND user count increased or Stop appeared
             # If none → raise before entering completion detection (which would
             # waste time polling for a response that will never come).
             #
@@ -1903,18 +1906,13 @@ class CDPDriver:
             if not captured_uuid:
                 try:
                     acknowledged = await self._verify_send_acknowledged()
-                    if acknowledged is False and response_validator is not None:
-                        # The UI can render late or virtualize user nodes.
-                        # Await this request's nonce instead of sending again.
-                        logger.warning(
-                            "Send acknowledgment inconclusive; waiting for the current Agent nonce without resending"
-                        )
-                    elif acknowledged is False:  # explicitly False, not None
+                    if acknowledged is False:  # explicitly False, not None
                         raise SendReadinessError(
                             "Send not acknowledged — click dispatched but no user "
                             "message appeared (no UUID captured, user count unchanged, "
-                            "composer not cleared). The page may be overloaded or the "
-                            "send was rejected. Do NOT retry automatically."
+                            "composer not cleared and no generation control appeared). "
+                            "The page may be overloaded or the send was rejected. "
+                            "Do NOT retry automatically."
                         )
                 except SendReadinessError:
                     raise

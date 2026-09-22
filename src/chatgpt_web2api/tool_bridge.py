@@ -239,7 +239,7 @@ class ToolBridge:
                     "text is not a visible image. "
                     "A 'not a function' result proves that entry point is wrong. Never repeat that same invalid call. "
                 )
-            if "exec" in freeform:
+            if any(name == "exec" or name.endswith("__exec") for name in freeform):
                 footer += self._codex_computer_use_reminder(
                     (prior_messages or []) + messages
                 )

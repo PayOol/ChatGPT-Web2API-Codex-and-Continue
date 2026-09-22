@@ -11,13 +11,14 @@ HARNESS = r"""
 const input=JSON.parse(process.argv[1]);
 function button(testid,label){const b={disabled:false,dataset:{testid},type:'submit',
  getClientRects(){return [1]},getAttribute(){return label},
- getBoundingClientRect(){return {left:0,top:0,width:20,height:20}},contains(el){return el===b}};return b;}
+ getBoundingClientRect(){return {left:0,top:0,width:20,height:20}},contains(el){return el===b},
+ click(){input.clicked=true}};return b;}
 const send=button('send-button','Envoyer');const stop=button('stop-button','Interrompre la réponse');
 const form={querySelectorAll(s){if(s==='[data-testid="stop-button"]')return input.busy?[stop]:[];return input.busy?[stop,send]:[send];}};
 const composer={closest(){return form}};
 const document={querySelector(){return composer},elementFromPoint(){return send}};
 const result=eval(input.code);
-process.stdout.write(JSON.stringify({result}));
+process.stdout.write(JSON.stringify({result,clicked:!!input.clicked}));
 """
 
 
@@ -51,17 +52,18 @@ class SendButtonGuardTests(unittest.IsolatedAsyncioTestCase):
                     await ChatGPTDom(driver).click_send()
             else:
                 await ChatGPTDom(driver).click_send()
-        return driver._cdp.await_args_list
+        return observations, driver._cdp.await_args_list
 
     async def test_generation_active_cannot_dispatch_clicks(self):
-        values = await self.run_case(True)
-        self.assertEqual(len(values), 0)
+        observations, cdp_calls = await self.run_case(True)
+        self.assertFalse(observations[-1]["clicked"])
+        self.assertEqual(len(cdp_calls), 0)
 
     async def test_idle_send_still_dispatches_expected_events(self):
-        values = await self.run_case(False)
-        self.assertEqual(
-            [v.args[1]["type"] for v in values], ["mouseMoved", "mousePressed", "mouseReleased"]
-        )
+        observations, cdp_calls = await self.run_case(False)
+        self.assertTrue(observations[-1]["clicked"])
+        self.assertEqual(observations[-1]["result"], '{"status":"clicked"}')
+        self.assertEqual(len(cdp_calls), 0)
 
 
 if __name__ == "__main__":

@@ -2,8 +2,10 @@
 
 - Supprime l'attente artificielle de 30 secondes entre les tours d'outils Codex. La cadence normale est désormais immédiate (`agent_request_interval_seconds: 0`), tandis que les vraies limitations signalées par ChatGPT conservent leur délai de protection.
 - Réutilise la conversation ChatGPT déjà ouverte pour les continuations d'outils et n'envoie plus à chaque tour le catalogue statique complet. Les nouveaux résultats sont transmis dans une enveloppe incrémentale bornée à 64 000 caractères.
-- Donne à Codex le chemin Computer Use réellement disponible (`exec` vers `mcp__node_repl__js`, puis `@oai/sky`) et interrompt les boucles observées après un point d'entrée invalide ou une initialisation déjà réussie.
+- Donne à Codex le chemin Computer Use réellement disponible (`exec`, y compris son alias natif `functions__exec`, vers `mcp__node_repl__js`, puis `@oai/sky`) et interrompt les boucles observées après un point d'entrée invalide ou une initialisation déjà réussie.
 - Expose la cadence active dans `/health`, remet à zéro les anciens délais de cadence persistés lors de la mise à jour et journalise la taille de chaque invite sans son contenu.
+- Utilise le clic DOM strictement borné au bouton actif du formulaire ChatGPT, vérifié ensuite par le message, le compositeur et le contrôle de génération. Cela corrige les clics CDP ignorés en arrière-plan et transforme tout envoi réellement non accepté en erreur immédiate au lieu d'une attente illimitée.
+- Lit la réponse structurée complète dans le backend lorsque le lecteur CodeMirror de ChatGPT n'en rend qu'un préfixe. Cette lecture exige l'identifiant exact du message utilisateur, un descendant assistant terminal `end_turn=true`, puis le même nonce et le même schéma d'outils que le parcours DOM.
 
 # Distribution 0.4.7
 

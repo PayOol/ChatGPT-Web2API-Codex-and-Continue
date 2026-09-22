@@ -149,7 +149,7 @@ async def test_send_succeeds_with_submit_type_fallback():
     the composer form, the broader fallback should find it."""
     dom, driver = _make_dom()
 
-    driver._js_strict = AsyncMock(return_value='{"status":"ready","x":10,"y":20}')
+    driver._js_strict = AsyncMock(return_value='{"status":"clicked"}')
     await dom.click_send()  # should NOT raise
 
 
