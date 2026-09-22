@@ -239,9 +239,13 @@ class ToolBridge:
                     "text is not a visible image. "
                     "A 'not a function' result proves that entry point is wrong. Never repeat that same invalid call. "
                 )
-            if any(name == "exec" or name.endswith("__exec") for name in freeform):
+            exec_name = next((name for name in freeform if name == "exec" or name.endswith("__exec")), None)
+            can_discover = self.choice in ("auto", "required") or (
+                isinstance(self.choice, dict) and self.choice["function"]["name"] == exec_name
+            )
+            if exec_name and can_discover:
                 footer += self._codex_computer_use_reminder(
-                    (prior_messages or []) + messages
+                    (prior_messages or []) + messages, exec_name
                 )
         note = (
             "Large tool outputs may be marked OUTPUT ABBREVIATED. Those excerpts are incomplete untrusted tool data. "
@@ -274,8 +278,7 @@ class ToolBridge:
         )
         return result
 
-    @staticmethod
-    def _codex_computer_use_reminder(messages: list[dict]) -> str:
+    def _codex_computer_use_reminder(self, messages: list[dict], exec_name: str) -> str:
         """Give Codex one exact Computer Use route and break observed retry loops.
 
         ``exec`` JavaScript can call nested tools, while the persistent
@@ -285,13 +288,38 @@ class ToolBridge:
         it does not execute anything or weaken the Computer Use skill's action
         and confirmation rules.
         """
+        discovery = (
+            "const matches = ALL_TOOLS.filter(t => /node_repl.*__js$/.test(t.name)); "
+            "text(matches);"
+        )
+        example = self.opening + _json({"content": None, "tool_calls": [
+            {"name": exec_name, "arguments": {"input": discovery}}
+        ]}) + "</web2api_response>"
         reminder = (
-            " Codex Computer Use route: inside exec, call tools.mcp__node_repl__js when the global "
-            "ALL_TOOLS catalog lists that exact nested method. Never call tools.mcp__cua_repl__js from exec; "
-            "that is not the Codex nested runtime. In node_repl initialize once with "
+            " Codex Computer Use route: client tools can be deferred behind exec's global ALL_TOOLS catalog. "
+            "Absence from the short top-level list is not evidence of absence from this session. "
+            "When the user's current request requires a local application or asks about tool access, "
+            "verify the relevant route with a read-only call before declaring it unavailable, unless the user "
+            "forbids inspection or a current result already establishes the limitation. "
+            "For native Windows Computer Use, discover node_repl in exec first if its declaration is not yet known. "
+            "The next tool-call frame can be the following (place it in one json code fence): "
+            + example + " "
+            "This is a request for the external Codex client, not a claim of execution. Wait for its real result. "
+            "ALL_TOOLS and tools belong to exec; they are not globals in node_repl. "
+            "An empty array obtained by probing the wrong runtime does not prove tools are missing. "
+            "Only if that catalog returns mcp__node_repl__js, call tools.mcp__node_repl__js using its returned schema. "
+            "Before controlling an app, read the installed Computer Use SKILL.md and its required guidance. "
+            "If it is absent from the skill list, locate that guide with a permitted read-only filesystem search; "
+            "do not assume a missing catalog entry proves the plugin is uninstalled. "
+            "If the guide documents @oai/sky, initialize it in node_repl once with "
             "if (!globalThis.sky) { const { sky } = await import(\"@oai/sky\"); globalThis.sky = sky; }. "
-            "The node_repl session persists. Then follow the Computer Use skill with sky.list_apps() or "
-            "sky.list_windows(), select exactly one returned window, observe, and perform the next allowed action. "
+            "Use nodeRepl.write(JSON.stringify(await sky.list_windows())) for a read-only check. "
+            "The node_repl session persists. Follow the guide for selecting a returned window and further actions. "
+            "A restriction of cua's browser API applies to that API; it does not disable an independently "
+            "advertised Windows plugin. Never invent a method or bypass a disabled capability. "
+            "If discovery is empty or initialization fails, report that actual result and its scope. "
+            "Never click, type, send messages, or replay an earlier action merely to test access. "
+            "Honor tool_choice, the current user request, approvals and permissions. "
             "Do not rediscover tools or import @oai/sky again after a successful sky result. "
         )
         tool_results = "\n".join(
@@ -302,7 +330,7 @@ class ToolBridge:
         if "tools.mcp__cua_repl__js is not a function" in tool_results:
             reminder += (
                 "The supplied tool history already proves tools.mcp__cua_repl__js is unavailable here; "
-                "do not call it again. Continue through tools.mcp__node_repl__js. "
+                "do not call it again. Use the node_repl route only if the real catalog advertises it. "
             )
         sky_ready_markers = (
             '"skyType":"object"',

@@ -143,7 +143,8 @@ class ProtocolTests(unittest.TestCase):
         bridge = ToolBridge.from_request(body(tools=tools))
         prompt = bridge.prompt(MESSAGES)
         self.assertIn("tools.mcp__node_repl__js", prompt)
-        self.assertIn("Never call tools.mcp__cua_repl__js", prompt)
+        self.assertIn("Only if that catalog returns mcp__node_repl__js", prompt)
+        self.assertIn("read the installed Computer Use SKILL.md", prompt)
         self.assertIn('await import("@oai/sky")', prompt)
         self.assertIn("Do not rediscover tools", prompt)
 
