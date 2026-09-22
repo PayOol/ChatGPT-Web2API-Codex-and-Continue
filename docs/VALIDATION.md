@@ -1,3 +1,19 @@
+# Validation de la distribution 0.4.9
+
+## Persistance Codex et découverte des outils — 22 septembre 2026
+
+La panne reproduite après redémarrage de Codex avait une cause distincte d’OpenCodex : le proxy restait en écoute sur `127.0.0.1:10100`, mais la passerelle Web2API sur `127.0.0.1:8081` s’était arrêtée. OpenCodex renvoyait donc `502 Provider unreachable`. La cible Codex installe maintenant une tâche Windows par utilisateur, liée par manifeste et journal de propriété à une seule racine. Son superviseur reste indépendant de l’application Codex et relance la passerelle après la disparition de son processus.
+
+Preuves obtenues sur l’installation réelle :
+
+- La tâche possédée est restée `Running` pendant l’arrêt forcé contrôlé de la passerelle, effectué avec zéro requête active.
+- Le port 8081 est passé du PID 55588 au PID 59504 en **7,96 secondes**. Le nouveau processus appartenait à la même racine ; CDP et le pilote étaient reconnectés, sans erreur.
+- Après cette relance, un POST sans outil à l’URL exacte utilisée par Codex, `http://127.0.0.1:10100/v1/responses`, a terminé avec le texte exact `OK` en **14,86 secondes**. `/health` indiquait ensuite `healthy`, une requête servie, zéro requête active et aucune dernière erreur.
+- Un contrôle natif Codex en lecture seule a découvert le chemin différé `exec` → `mcp__node_repl__js` dans `ALL_TOOLS`, initialisé Computer Use selon son guide et listé la fenêtre WhatsApp active. Aucun clic, texte, message ni autre interaction d’interface n’a été effectué.
+- La suite locale hors E2E a réussi : **1 126 tests**, **21 sous-tests**, un test ignoré et 32 scénarios E2E explicitement exclus. Ruff passe sur `src` et `tests`.
+
+La preuve de relance couvre une terminaison réelle du processus et le trajet réseau complet jusqu’à ChatGPT Web. Elle ne garantit pas qu’aucune future mise à jour de Windows, Codex, OpenCodex ou du site ChatGPT ne modifiera leurs contrats. La tâche refuse d’adopter ou de supprimer une entrée dont le nom, l’action, le dossier ou le journal de propriété ne correspondent plus.
+
 # Validation de la distribution 0.4.4
 
 ## Progression et outils Codex — 21 septembre 2026

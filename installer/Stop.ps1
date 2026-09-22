@@ -1,5 +1,12 @@
 param([switch]$CloseBrowser)
 $ErrorActionPreference='Stop'
+$manifestPath=Join-Path $PSScriptRoot 'installation.json'
+$manifest=if(Test-Path -LiteralPath $manifestPath -PathType Leaf){Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json}else{$null}
+$serviceTaskHelper=Join-Path $PSScriptRoot 'ServiceTask-Codex.ps1'
+$serviceTaskState=Join-Path $PSScriptRoot 'service-task.json'
+if($manifest -and $manifest.installation_target -eq 'codex' -and (Test-Path -LiteralPath $serviceTaskHelper -PathType Leaf) -and (Test-Path -LiteralPath $serviceTaskState -PathType Leaf)){
+    & $serviceTaskHelper -Action Stop
+}
 $configFile=Join-Path $PSScriptRoot 'config.json'
 $owned=@(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
     $_.CommandLine -like '*-m chatgpt_web2api*' -and $_.CommandLine.Contains($configFile)
@@ -13,7 +20,7 @@ foreach($service in $owned) {
     }
 }
 if ($CloseBrowser) {
-    $manifest=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installation.json') -Raw | ConvertFrom-Json
+    if(-not $manifest){$manifest=Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json}
     $profile=Join-Path $PSScriptRoot 'browser-profile'
     $browsers=@(Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object {
         $_.ExecutablePath -eq $manifest.browser -and $_.CommandLine.Contains($profile) -and $_.CommandLine -notlike '*--type=*'

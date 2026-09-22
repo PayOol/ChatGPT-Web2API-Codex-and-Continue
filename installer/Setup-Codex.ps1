@@ -149,24 +149,34 @@ try {
     Invoke-Checked $python $configureArgs -Label 'Configuration Codex et navigateur isole'
     Invoke-Checked $python @($configure,'--root',$InstallRoot,'--register') -Label 'Enregistrement du modele via OpenCodex'
     Start-InstallStep 'Installation des lanceurs et de la maintenance'
-    foreach ($name in @('Environment.ps1','Start.cmd','Stop.ps1','Doctor.cmd','Repair.cmd','Uninstall.ps1','Uninstall.cmd')) { Copy-Item -LiteralPath (Join-Path $app ('installer\'+$name)) -Destination $InstallRoot -Force }
+    foreach ($name in @('Environment.ps1','Start.cmd','Stop.ps1','Doctor.cmd','Repair.cmd','Uninstall.ps1','Uninstall.cmd','Service-Codex.ps1','ServiceTask-Codex.ps1')) { Copy-Item -LiteralPath (Join-Path $app ('installer\'+$name)) -Destination $InstallRoot -Force }
     Copy-Item -LiteralPath (Join-Path $app 'installer\Start-Codex.ps1') -Destination (Join-Path $InstallRoot 'Start.ps1') -Force
     Copy-Item -LiteralPath (Join-Path $app 'installer\Doctor-Codex.ps1') -Destination (Join-Path $InstallRoot 'Doctor.ps1') -Force
     Start-InstallStep 'Verification finale de l''installation'
     Invoke-Checked $python @($configure,'--root',$InstallRoot,'--check') -Label 'Diagnostic hors ligne de la distribution Codex'
     Start-InstallStep 'Raccourcis et demarrage automatique'
     if (-not $NoShortcuts) {
+        $serviceTaskHelper=Join-Path $InstallRoot 'ServiceTask-Codex.ps1'
+        & $serviceTaskHelper -Action Install
         $shell=New-Object -ComObject WScript.Shell
-        foreach ($folder in @([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Startup'))) {
-            $shortcut=$shell.CreateShortcut((Join-Path $folder 'Web2API Codex.lnk'))
-            $shortcut.TargetPath=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-            $shortcut.Arguments='-NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $InstallRoot 'Start.ps1')+'"'
-            if ($folder -eq [Environment]::GetFolderPath('Startup')) { $shortcut.Arguments+=' -ServiceOnly' }
-            elseif ($SkipDesktop) { $shortcut.Arguments+=' -SkipDesktop' }
-            $shortcut.WorkingDirectory=$InstallRoot
-            $shortcut.WindowStyle=7
-            $shortcut.Save()
+        $desktop=[Environment]::GetFolderPath('Desktop')
+        $shortcut=$shell.CreateShortcut((Join-Path $desktop 'Web2API Codex.lnk'))
+        $shortcut.TargetPath=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $shortcut.Arguments='-NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $InstallRoot 'Start.ps1')+'"'
+        if ($SkipDesktop) { $shortcut.Arguments+=' -SkipDesktop' }
+        $shortcut.WorkingDirectory=$InstallRoot
+        $shortcut.WindowStyle=7
+        $shortcut.Save()
+        $legacyStartup=Join-Path ([Environment]::GetFolderPath('Startup')) 'Web2API Codex.lnk'
+        if(Test-Path -LiteralPath $legacyStartup){
+            $legacy=$shell.CreateShortcut($legacyStartup)
+            if($legacy.Arguments.Contains((Join-Path $InstallRoot 'Start.ps1'))){Remove-Item -LiteralPath $legacyStartup -Force}
         }
+    } elseif(Test-Path -LiteralPath (Join-Path $InstallRoot 'service-task.json') -PathType Leaf) {
+        # Preserve an already-owned supervisor during a maintenance run that
+        # merely asks not to create new shortcuts. Stop.ps1 placed this marker
+        # while files were updated; the next logon must be allowed to start it.
+        Remove-Item -LiteralPath (Join-Path $InstallRoot 'state\service-stop.requested') -Force -ErrorAction SilentlyContinue
     }
     Start-InstallStep 'Premier lancement'
     if (-not $NoLaunch) { & (Join-Path $InstallRoot 'Start.ps1') }

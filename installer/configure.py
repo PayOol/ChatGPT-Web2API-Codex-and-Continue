@@ -13,7 +13,7 @@ import time
 
 import normal_profile
 
-VERSION = "0.4.8"
+VERSION = "0.4.9"
 
 
 def write_changed(path: Path, data: bytes, backup: Path):

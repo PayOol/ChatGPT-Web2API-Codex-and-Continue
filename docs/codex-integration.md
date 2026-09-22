@@ -1,10 +1,10 @@
-# ChatGPT Web2API 0.4.0 — Codex integration
+# ChatGPT Web2API 0.4.9 — Codex integration
 
-The 0.4.0 installer adds `chatgpt-web2api/auto` through OpenCodex's supported local management API. It leaves model selection to the user. It does not patch Codex, replace installed packages, change the default provider, add a native alias/combo, or configure tools, permissions, approval policy, global guidance, Fast mode or `codexToolMode`.
+The Codex target adds `chatgpt-web2api/auto` through OpenCodex's supported local management API. It leaves model selection to the user. It does not patch Codex, replace installed packages, change the default provider, add a native alias/combo, or configure tools, permissions, approval policy, global guidance, Fast mode or `codexToolMode`.
 
 ## Two installer targets
 
-The [0.4.0 release](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/tag/v0.4.0) offers **Codex** or **Continue**. Codex defaults to `%LOCALAPPDATA%/Programs/Web2API-Codex`; Continue defaults to `%LOCALAPPDATA%/Programs/Web2API-Continue`. The target is recorded in `installation.json`, and repair keeps that target. Do not reuse one target's root for the other.
+The [0.4.9 release](https://github.com/PayOol/ChatGPT-Web2API-Continue/releases/tag/v0.4.9) offers **Codex** or **Continue**. Codex defaults to `%LOCALAPPDATA%/Programs/Web2API-Codex`; Continue defaults to `%LOCALAPPDATA%/Programs/Web2API-Continue`. The target is recorded in `installation.json`, and repair keeps that target. Do not reuse one target's root for the other.
 
 The Codex branch uses Codex's native tool surface and existing permissions. It does not install the Continue Local, Browser, Computer, Vision or Connected MCP servers, Hostinger MCP, Continue extension patches, or a universal set of app connections. The native application is reused or installed through its official Microsoft Store package; its own tools, plugins, authentication and updates remain under Codex's control. These are installation contracts, not a claim of completed live validation.
 
@@ -18,6 +18,8 @@ The Codex branch uses Codex's native tool surface and existing permissions. It d
 ## Maintenance by target
 
 Run `Doctor.cmd`, `Repair.cmd` and `Uninstall.cmd` from the root being maintained. For Codex, Doctor checks the installation and desktop package, plus bridge health and OpenCodex identity unless `-Offline` is requested. Repair resumes the Codex target. Uninstall detaches the owned provider and, for a managed proxy, removes only unchanged journalled route keys and stops that verified process. It preserves an external OpenCodex service and the native Codex application.
+
+Since 0.4.9, a normal Codex installation registers an owned per-user Windows task that runs `Service-Codex.ps1` independently of the Codex application. It starts at logon and restarts only the bridge process belonging to the same manifest and root. `Start.cmd` starts that task, `Stop.ps1` stops it before terminating owned bridge processes, and uninstall removes it only after its name, action, working directory and ownership journal match. `--no-shortcuts` deliberately skips creating this automatic-start task; an already-owned task is preserved during maintenance.
 
 For Continue, Doctor checks its patches and five MCP catalogs, Repair reapplies its integration, and Uninstall restores unchanged owned entries; VS Code must be closed for repair/removal. Continue uninstall also invokes provider detach when an add-on journal exists. Both targets preserve personal browser data, histories, media, configuration, logs and backups. User edits, ownership conflicts or pending catalog removal stop program deletion. Neither Doctor nor a model appearing in a catalog proves a successful live tool call. See [VALIDATION.md](VALIDATION.md) for evidence recorded separately by the validation owner.
 

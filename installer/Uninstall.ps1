@@ -23,6 +23,13 @@ if ($manifest.installation_target -eq 'codex') {
     }
 }
 & (Join-Path $root 'Stop.ps1') -CloseBrowser
+if ($manifest.installation_target -eq 'codex') {
+    $serviceTaskHelper=Join-Path $root 'ServiceTask-Codex.ps1'
+    $serviceTaskState=Join-Path $root 'service-task.json'
+    if((Test-Path -LiteralPath $serviceTaskHelper -PathType Leaf) -and (Test-Path -LiteralPath $serviceTaskState -PathType Leaf)){
+        & $serviceTaskHelper -Action Remove
+    }
+}
 if ($manifest.installation_target -ne 'codex') {
     & (Join-Path $root 'venv\Scripts\python.exe') (Join-Path $root 'app\installer\normal_profile.py') --detach $root
     if ($LASTEXITCODE -ne 0) { throw 'Retrait du profil normal interrompu. Les programmes sont conserves.' }

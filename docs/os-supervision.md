@@ -6,10 +6,12 @@
 > proxy running continuously under an OS supervisor.
 
 This guide shows how to run `chatgpt-web2api` under a native OS supervisor so it
-survives reboots and restarts on failure. It is **documentation only**: no
-supervisor scripts are installed by the package, no daemonization code is added,
-and no package entrypoints change. The snippets below are copy-paste templates
-for the operator to adapt and install themselves.
+survives reboots and restarts on failure. For the generic Python package and server
+deployments, it is **documentation only**: no supervisor scripts are installed and
+no package entrypoints change. The private Windows Codex distribution separately
+installs a narrowly scoped per-user task for its local bridge; see
+[codex-integration.md](codex-integration.md). The snippets below remain templates
+for other deployments to adapt and install themselves.
 
 ---
 
@@ -460,8 +462,8 @@ production data shows they need tuning (deferred follow-up E,
 
 ## What this guide deliberately does NOT do
 
-- **No supervisor scripts installed by the package.** All snippets are
-  operator-installed templates.
+- **No generic server supervisor installed by the Python package.** All snippets are
+  operator-installed templates; the private Windows Codex installer has its separate owned task.
 - **No daemonization code, no built-in watchdog loop.** `ensure` is point-in-time
   by design; continuous supervision belongs to the OS.
 - **No package entrypoint changes.** The console scripts (`chatgpt-web2api`,

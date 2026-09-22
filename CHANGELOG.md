@@ -1,3 +1,11 @@
+# Distribution 0.4.9
+
+- Maintient la passerelle Codex dans une tâche Windows appartenant à l’installation et au compte utilisateur, indépendante du processus de l’application Codex et relancée à chaque ouverture de session.
+- Supervise le processus Python et le relance automatiquement s’il tombe. Les lanceurs conservent un chemin de secours pour les anciennes installations qui ne possèdent pas encore la tâche.
+- Vérifie l’identité complète de la tâche avant démarrage, arrêt ou retrait. La migration supprime uniquement l’ancien raccourci de démarrage qui vise la même racine ; les tâches et processus tiers restent intacts.
+- Corrige les commandes de maintenance PowerShell afin qu’elles ne confondent plus une ancienne valeur de `LASTEXITCODE` avec l’échec d’un script de gestion de la tâche.
+- Fait découvrir les outils Codex différés dans le catalogue `ALL_TOOLS` avant de déclarer Computer Use indisponible. La découverte respecte `tool_choice`, demande une lecture seule et n’exécute aucune interaction d’interface pour tester l’accès.
+
 # Distribution 0.4.8
 
 - Supprime l'attente artificielle de 30 secondes entre les tours d'outils Codex. La cadence normale est désormais immédiate (`agent_request_interval_seconds: 0`), tandis que les vraies limitations signalées par ChatGPT conservent leur délai de protection.

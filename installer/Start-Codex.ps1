@@ -15,6 +15,8 @@ $digest=[Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UT
 $mutex=[Threading.Mutex]::new($false,('Local\Web2API-Start-'+[BitConverter]::ToString($digest).Replace('-','')))
 if (-not $mutex.WaitOne(10000)) { $mutex.Dispose(); throw 'Un lancement est deja en cours.' }
 $configFile=Join-Path $root 'config.json'
+$serviceTaskHelper=Join-Path $root 'ServiceTask-Codex.ps1'
+$serviceTaskState=Join-Path $root 'service-task.json'
 $configArgument='(?:^|\s)--config\s+(?:"'+[regex]::Escape($configFile)+'"|'+[regex]::Escape($configFile)+')(?=\s|$)'
 function Get-OwnedBridge {
     @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
@@ -52,6 +54,10 @@ try {
         if (-not $application) { throw 'Point de lancement de Codex Desktop introuvable.' }
         $desktopId=$desktop.PackageFamilyName+'!'+$application.Id
     }
+    $supervised=(Test-Path -LiteralPath $serviceTaskHelper -PathType Leaf) -and (Test-Path -LiteralPath $serviceTaskState -PathType Leaf)
+    if($supervised){
+        & $serviceTaskHelper -Action Start
+    }
     $owned=@(Get-OwnedBridge)
     $ownedIds=@($owned | ForEach-Object { $_.ProcessId })
     $top=@($owned | Where-Object { $_.ParentProcessId -notin $ownedIds })
@@ -71,7 +77,9 @@ try {
     }
     if (-not $owned.Count) {
         $null=Assert-PortOwner @()
-        Start-Process -FilePath $python -ArgumentList @('-u','-m','chatgpt_web2api','--config',('"'+$configFile+'"')) -WindowStyle Hidden -WorkingDirectory $root -RedirectStandardOutput (Join-Path $logs 'stdout.log') -RedirectStandardError (Join-Path $logs 'stderr.log') | Out-Null
+        if(-not $supervised){
+            Start-Process -FilePath $python -ArgumentList @('-u','-m','chatgpt_web2api','--config',('"'+$configFile+'"')) -WindowStyle Hidden -WorkingDirectory $root -RedirectStandardOutput (Join-Path $logs 'stdout.log') -RedirectStandardError (Join-Path $logs 'stderr.log') | Out-Null
+        }
     }
     $deadline=[DateTime]::UtcNow.AddSeconds(60)
     $awaitingLogin=$false

@@ -159,8 +159,8 @@ with two supervisor styles:
   supervisor owns restart policy for the two long-lived processes (REST owns
   Chrome; MCP/SSE is a separate process that attaches to it).
 
-The guide is documentation only — no supervisor scripts are installed by the
-package. ZCode users should prefer the `ensure` hook over OS supervision.
+The generic Python package does not install these server templates. The private Windows Codex distribution has a narrower, owned per-user Task Scheduler supervisor for its local bridge;
+it is documented in [codex-integration.md](codex-integration.md). ZCode users should prefer the `ensure` hook over OS supervision.
 
 ---
 

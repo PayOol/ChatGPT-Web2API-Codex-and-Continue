@@ -100,12 +100,15 @@ jobs:
         shell: pwsh
         run: |
           "CODEX_HOME=$env:RUNNER_TEMP\codex-profile" >> $env:GITHUB_ENV
-      - name: Install the Codex route without Store UI or shortcuts
+      - name: Install the Codex route and its owned supervisor without Store UI
         shell: powershell
         run: |
           $exe=(Get-ChildItem dist\Web2API-Continue-Setup-*.exe).FullName
-          & $exe --target codex --root "$env:RUNNER_TEMP\Programs\Web2API-Codex" --no-launch --no-shortcuts --skip-desktop
+          $root="$env:RUNNER_TEMP\Programs\Web2API-Codex"
+          & $exe --target codex --root $root --no-launch --skip-desktop
           if ($LASTEXITCODE -ne 0) { throw 'Codex target installation failed' }
+          $serviceStatus=& "$root\ServiceTask-Codex.ps1" -Action Status | ConvertFrom-Json
+          if (-not $serviceStatus.owned -or $serviceStatus.state -ne 'Ready') { throw 'Owned Codex supervisor task was not installed' }
       - name: Verify the model in the real Codex App Server
         run: python tests/codex_runtime.py --root "${{ runner.temp }}/Programs/Web2API-Codex"
       - name: Verify selective removal

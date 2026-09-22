@@ -464,11 +464,34 @@ def test_installer_uses_private_dependencies_and_consistent_progress():
         assert forbidden not in text
     assert "9PLM9XGG6VKS" in text and "Get-AppxPackage -Name OpenAI.Codex" in text
     assert "if ($SkipDesktop -and -not $NoLaunch)" in text
+    assert "Service-Codex.ps1" in text and "ServiceTask-Codex.ps1" in text
+    assert "-Action Install" in text
+    assert "GetFolderPath('Startup')" in text  # legacy shortcut is selectively removed.
+
+
+def test_codex_launcher_prefers_owned_supervisor_with_legacy_fallback():
+    start = (SOURCE / "installer/Start-Codex.ps1").read_text()
+    stop = (SOURCE / "installer/Stop.ps1").read_text()
+    uninstall = (SOURCE / "installer/Uninstall.ps1").read_text()
+    service = (SOURCE / "installer/Service-Codex.ps1").read_text()
+    assert "service-task.json" in start and "-Action Start" in start
+    assert "if(-not $supervised)" in start and "Start-Process -FilePath $python" in start
+    assert "-Action Stop" in stop
+    assert "-Action Remove" in uninstall
+    assert "Start-Sleep -Seconds 1" in service
+    assert "Wait-Process" not in service
+    assert "OpenCodex : " in service
+    assert "& $serviceTaskHelper -Action Start\n        if($LASTEXITCODE" not in start
+    assert "& $serviceTaskHelper -Action Stop\n    if($LASTEXITCODE" not in stop
+    assert "& $serviceTaskHelper -Action Remove\n        if($LASTEXITCODE" not in uninstall
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell 5.1 only")
 def test_powershell_files_parse_without_execution():
-    files = [SOURCE / "installer" / name for name in ("Setup-Codex.ps1", "Start-Codex.ps1", "Doctor-Codex.ps1")]
+    files = [SOURCE / "installer" / name for name in (
+        "Setup-Codex.ps1", "Start-Codex.ps1", "Doctor-Codex.ps1",
+        "Service-Codex.ps1", "ServiceTask-Codex.ps1", "Stop.ps1", "Uninstall.ps1",
+    )]
     quoted = ",".join("'" + str(path).replace("'", "''") + "'" for path in files)
     script = f"$ErrorActionPreference='Stop'; foreach ($f in @({quoted})) {{ $t=$null; $e=$null; [Management.Automation.Language.Parser]::ParseFile($f,[ref]$t,[ref]$e) | Out-Null; if ($e.Count) {{ throw ($e | Out-String) }} }}"
     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True, timeout=30)
